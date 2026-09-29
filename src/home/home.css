@@ -289,34 +289,56 @@
   transition: width 0.6s ease;
 }
 .home-widget .meter .val { width: 44px; text-align: right; font-size: 10px; }
-/* ── limits tile: one row per window, every provider in the same column ──
- * A table, not columns: the provider names its group once, then each window
- * gets its own bar row, so bars, percentages and countdowns stay aligned. */
-.home-widget .usage { display: flex; flex-direction: column; gap: 1px; }
-.home-widget .usage-row { display: flex; align-items: center; gap: 6px; }
-.home-widget .usage-prov {
+/* ── limits tile: one row per window ──
+ * `name · bar · value` — the bar takes what the labels do not need, and the
+ * percentage sits next to its own bar with the countdown right behind it. */
+.home-widget .usage { display: flex; flex-direction: column; gap: 5px; }
+.home-widget .usage-row { display: flex; align-items: center; gap: 8px; }
+.home-widget .usage-name {
   flex: none;
-  width: 52px;
-  font-size: 9px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--home-accent-dim);
+  width: 100px;
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.home-widget .usage-win { flex: none; width: 44px; font-size: 10px; }
 .home-widget .usage-track {
-  flex: 1;
-  min-width: 24px;
+  flex: 1 1 auto;
+  min-width: 32px;
   height: 9px;
   border-radius: 2px;
   background: rgb(255 255 255 / 0.07);
   overflow: hidden;
 }
+.home-widget .usage-track .fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--home-accent-dim), var(--home-accent));
+  transition: width 0.6s ease;
+}
+.home-widget .usage-track .fill.usage-critical { background: var(--home-error); }
+.home-widget .usage-track .fill.usage-warning { background: var(--color-warning, var(--home-accent)); }
 .home-widget .usage-track-plain { background: none; }
-.home-widget .usage-pct { flex: none; width: 46px; text-align: right; font-size: 10px; font-variant-numeric: tabular-nums; }
-.home-widget .usage-reset { flex: none; width: 52px; text-align: right; font-size: 9px; white-space: nowrap; }
+.home-widget .usage-value {
+  flex: none;
+  display: flex;
+  justify-content: flex-end;
+  gap: 5px;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+/* Fixed value slots: every percentage and every countdown sits in the same
+ * column, so the bars share both edges and the numbers line up. */
+.home-widget .usage-pct { width: 34px; text-align: right; }
+.home-widget .usage-reset {
+  width: 62px;
+  text-align: right;
+  font-size: 9px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .home-widget .usage .tok-stats { margin-top: 0; }
-.home-widget .usage-critical { background: var(--home-error); }
-.home-widget .usage-warning { background: var(--color-warning, var(--home-accent)); }
 
 .home-widget .ok { color: var(--home-accent); }
 .home-widget .dim { color: var(--color-muted-foreground, #6b7387); }

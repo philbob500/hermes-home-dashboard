@@ -162,7 +162,7 @@ export function ProviderUsageWidget() {
     if (!data?.available || !data.windows.length) {
       rows.push(
         <div className="usage-row" key={`${id}-empty`}>
-          <span className="usage-prov">{name}</span>
+          <span className="usage-name">{name}</span>
           <span className="dim">keine Daten</span>
         </div>,
       );
@@ -179,10 +179,7 @@ export function ProviderUsageWidget() {
           : "fill";
       rows.push(
         <div className="usage-row" key={`${id}-${window.label}-${index}`}>
-          {/* The provider names its group once; the following windows keep the
-            * same indent so the bars stay in one column. */}
-          <span className="usage-prov">{index === 0 ? name : ""}</span>
-          <span className="usage-win">{title}</span>
+          <span className="usage-name">{`${name} ${title}`}</span>
           <div
             className="usage-track"
             role="progressbar"
@@ -194,9 +191,11 @@ export function ProviderUsageWidget() {
           >
             {percent !== null && <div className={fillClass} style={{ width: `${percent}%` }} />}
           </div>
-          <span className="usage-pct">{displayPercent(percent)}</span>
-          <span className="usage-reset dim" title={window.reset_at ?? ""}>
-            {reset ?? "—"}
+          <span className="usage-value">
+            <span className="usage-pct">{displayPercent(percent)}</span>
+            <span className="usage-reset dim" title={window.reset_at ?? ""}>
+              {reset ? `· ${reset}` : "—"}
+            </span>
           </span>
         </div>,
       );
@@ -209,12 +208,13 @@ export function ProviderUsageWidget() {
     const amount = balance ? formatMoney(balance.total, balance.currency) : null;
     rows.push(
       <div className="usage-row" key="deepseek">
-        <span className="usage-prov">deepseek</span>
-        <span className="usage-win">Guthaben</span>
+        <span className="usage-name">DeepSeek</span>
         <div className="usage-track usage-track-plain" />
-        <span className="usage-pct ok">{amount ?? "—"}</span>
-        <span className="usage-reset dim">
-          {!balance ? "n/a" : balance.peak ? "Peak" : "Off-Peak"}
+        <span className="usage-value">
+          <span className="usage-pct ok">{amount ?? "—"}</span>
+          <span className="usage-reset dim">
+            {!balance ? "n/a" : balance.peak ? "· Peak" : "· Off-Peak"}
+          </span>
         </span>
       </div>,
     );
