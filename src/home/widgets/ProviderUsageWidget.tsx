@@ -114,7 +114,7 @@ export function ProviderUsageWidget({ provider }: Props) {
 
   if (!usage) {
     return (
-      <div className="quota-usage" ref={setRoot}>
+      <div className="usage" ref={setRoot}>
         {refresh}
         <span className="dim">
           {failed ? "Kontingent nicht erreichbar" : "Lade Kontingent…"}
@@ -125,7 +125,7 @@ export function ProviderUsageWidget({ provider }: Props) {
 
   if (!usage.available || !usage.windows.length) {
     return (
-      <div className="quota-usage" ref={setRoot}>
+      <div className="usage" ref={setRoot}>
         {refresh}
         <span className="dim">Keine Kontingentdaten verfügbar</span>
       </div>
@@ -133,20 +133,21 @@ export function ProviderUsageWidget({ provider }: Props) {
   }
 
   return (
-    <div className="quota-usage" ref={setRoot}>
+    <div className="usage" ref={setRoot}>
       {refresh}
-      {usage.windows.map((window) => {
-        const percent = progressPercent(window.used_percent);
-        const title = windowTitle(provider, window.label);
-        const reset = timeToReset(window.reset_at, now);
-        const fillClass = percent !== null && percent >= 95
-          ? "fill quota-critical"
-          : percent !== null && percent >= 75
-            ? "fill quota-warning"
-            : "fill";
-        return (
-          <div className="quota-window" key={`${window.label}:${window.reset_at ?? "none"}`}>
-            <div className="meter quota-meter">
+      {/* Shared meter rows: `.meters` puts them side by side once the tile is
+        * wide enough, so the bars use the width instead of a fixed slot. */}
+      <div className="meters">
+        {usage.windows.map((window, index) => {
+          const percent = progressPercent(window.used_percent);
+          const title = windowTitle(provider, window.label);
+          const fillClass = percent !== null && percent >= 95
+            ? "fill usage-critical"
+            : percent !== null && percent >= 75
+              ? "fill usage-warning"
+              : "fill";
+          return (
+            <div className="meter" key={`${window.label}:${window.reset_at ?? "none"}:${index}`}>
               <span className="lbl">{title}</span>
               <div
                 className="track"
@@ -163,16 +164,31 @@ export function ProviderUsageWidget({ provider }: Props) {
               </div>
               <span className="val">{displayPercent(percent)}</span>
             </div>
-            <div className="quota-reset dim">
-              {reset ? `Reset ${reset}` : "Resetzeit unbekannt"}
-            </div>
-          </div>
-        );
-      })}
-      {failed && <div className="quota-reset werr">Aktualisierung fehlgeschlagen</div>}
+          );
+        })}
+      </div>
+      {/* Shared totals line (Tokens footer): one compact row for the reset
+        * countdowns instead of a second right-aligned block per window. */}
+      <div className="tok-stats">
+        {usage.windows.map((window, index) => {
+          const reset = timeToReset(window.reset_at, now);
+          return (
+            <span key={`${window.label}:${index}`}>
+              <span className="dim">{windowTitle(provider, window.label)}</span>{" "}
+              {reset ? `Reset ${reset}` : "Reset unbekannt"}
+            </span>
+          );
+        })}
+        {failed && <span className="werr">Aktualisierung fehlgeschlagen</span>}
+      </div>
       {usage.fetched_at && (
-        <div className="quota-updated dim">
-          Stand {new Date(usage.fetched_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+        <div className="hover-reveal">
+          <div className="tok-stats">
+            <span>
+              <span className="dim">Stand</span>{" "}
+              {new Date(usage.fetched_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+            </span>
+          </div>
         </div>
       )}
     </div>

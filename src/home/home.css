@@ -289,15 +289,22 @@
   transition: width 0.6s ease;
 }
 .home-widget .meter .val { width: 44px; text-align: right; font-size: 10px; }
-.home-widget .quota-usage { display: flex; flex-direction: column; gap: 3px; }
-.home-widget .quota-window { break-inside: avoid; }
-.home-widget .quota-meter .lbl { width: 58px; white-space: nowrap; }
-.home-widget .quota-meter .val { width: 76px; white-space: nowrap; }
-.home-widget .quota-reset,
-.home-widget .quota-updated { font-size: 9px; line-height: 1.3; text-align: right; }
-.home-widget .quota-critical { background: var(--home-error); }
-.home-widget .quota-warning { background: var(--color-warning, var(--home-accent)); }
-.home-widget .quota-updated { margin-top: 2px; }
+/* ── provider quota tiles (codex, claude) ──
+ * They reuse the shared pieces: `.meters` for the bars (two columns once the
+ * tile is wide enough) and the Tokens `.tok-stats` line for the countdowns.
+ * Only the label slot, a taller bar and the two state fills are local. */
+.home-widget .usage .meter { margin: 5px 0; }
+.home-widget .usage .meter .lbl { width: 48px; white-space: nowrap; }
+.home-widget .usage .meter .track { height: 10px; }
+.home-widget .usage .tok-stats { margin-top: 5px; }
+.home-widget .usage-critical { background: var(--home-error); }
+.home-widget .usage-warning { background: var(--color-warning, var(--home-accent)); }
+/* The shared `.meters` breakpoint (380px) is tuned for the Host meter stack;
+ * a 4-column quota tile sits under it in most layouts, so the two windows
+ * would stay stacked. Lower it here instead of duplicating the styles. */
+@container (min-width: 280px) {
+  .home-widget .usage .meters { columns: 2; }
+}
 
 .home-widget .ok { color: var(--home-accent); }
 .home-widget .dim { color: var(--color-muted-foreground, #6b7387); }
