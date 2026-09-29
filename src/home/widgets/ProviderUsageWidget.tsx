@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { fetchJSON } from "../../sdk";
+import { HoverCtl } from "./HoverArrows";
 import {
   displayPercent,
   progressPercent,
@@ -31,41 +32,71 @@ interface Props {
 export function ProviderUsageWidget({ provider }: Props) {
   const [usage, setUsage] = useState<SubscriptionUsageResponse | null>(null);
   const [failed, setFailed] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [now, setNow] = useState(Date.now());
 
+  const load = useCallback(async () => {
+    setBusy(true);
+    try {
+      const result = await fetchJSON<SubscriptionUsageResponse>(
+        `/api/plugins/home-dashboard/subscription-usage/${encodeURIComponent(provider)}`,
+      );
+      setUsage(result);
+      setFailed(false);
+    } catch {
+      setFailed(true);
+    } finally {
+      setBusy(false);
+    }
+  }, [provider]);
+
   useEffect(() => {
-    let active = true;
-    const load = async () => {
-      try {
-        const result = await fetchJSON<SubscriptionUsageResponse>(
-          `/api/plugins/home-dashboard/subscription-usage/${encodeURIComponent(provider)}`,
-        );
-        if (active) {
-          setUsage(result);
-          setFailed(false);
-        }
-      } catch {
-        if (active) setFailed(true);
-      }
-    };
     void load();
     const poll = setInterval(() => void load(), POLL_MS);
     const clock = setInterval(() => setNow(Date.now()), CLOCK_MS);
     return () => {
-      active = false;
       clearInterval(poll);
       clearInterval(clock);
     };
-  }, [provider]);
+  }, [load]);
 
-  if (!usage && failed) return <span className="dim">Kontingent nicht erreichbar</span>;
-  if (!usage) return <span className="dim">Lade Kontingent…</span>;
+  const refresh = (
+    <HoverCtl>
+      <button
+        className="hv-opt"
+        disabled={busy}
+        onClick={() => void load()}
+        title="Kontingent aktualisieren"
+        aria-label="Kontingent aktualisieren"
+      >
+        {busy ? "…" : "↻"}
+      </button>
+    </HoverCtl>
+  );
+
+  if (!usage) {
+    return (
+      <div className="quota-usage">
+        {refresh}
+        <span className="dim">
+          {failed ? "Kontingent nicht erreichbar" : "Lade Kontingent…"}
+        </span>
+      </div>
+    );
+  }
+
   if (!usage.available || !usage.windows.length) {
-    return <span className="dim">Keine Kontingentdaten verfügbar</span>;
+    return (
+      <div className="quota-usage">
+        {refresh}
+        <span className="dim">Keine Kontingentdaten verfügbar</span>
+      </div>
+    );
   }
 
   return (
     <div className="quota-usage">
+      {refresh}
       {usage.windows.map((window) => {
         const percent = progressPercent(window.used_percent);
         const title = windowTitle(provider, window.label);

@@ -1,6 +1,6 @@
 import { jsx, jsxs, Fragment } from "react/jsx-runtime";
 import { host } from "@hermes/plugin-sdk";
-import { useState, useEffect, useRef, useMemo, forwardRef, useImperativeHandle, useCallback } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback, forwardRef, useImperativeHandle } from "react";
 function getDashboardHost() {
   const sdk = window.__HERMES_PLUGIN_SDK__;
   if (!sdk) throw new Error("Hermes plugin SDK not available");
@@ -1681,37 +1681,56 @@ const CLOCK_MS = 60 * 1e3;
 function ProviderUsageWidget({ provider }) {
   const [usage, setUsage] = useState(null);
   const [failed, setFailed] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [now, setNow] = useState(Date.now());
+  const load = useCallback(async () => {
+    setBusy(true);
+    try {
+      const result = await fetchJSON(
+        `/api/plugins/home-dashboard/subscription-usage/${encodeURIComponent(provider)}`
+      );
+      setUsage(result);
+      setFailed(false);
+    } catch {
+      setFailed(true);
+    } finally {
+      setBusy(false);
+    }
+  }, [provider]);
   useEffect(() => {
-    let active2 = true;
-    const load = async () => {
-      try {
-        const result = await fetchJSON(
-          `/api/plugins/home-dashboard/subscription-usage/${encodeURIComponent(provider)}`
-        );
-        if (active2) {
-          setUsage(result);
-          setFailed(false);
-        }
-      } catch {
-        if (active2) setFailed(true);
-      }
-    };
     void load();
     const poll = setInterval(() => void load(), POLL_MS$1);
     const clock = setInterval(() => setNow(Date.now()), CLOCK_MS);
     return () => {
-      active2 = false;
       clearInterval(poll);
       clearInterval(clock);
     };
-  }, [provider]);
-  if (!usage && failed) return /* @__PURE__ */ jsx("span", { className: "dim", children: "Kontingent nicht erreichbar" });
-  if (!usage) return /* @__PURE__ */ jsx("span", { className: "dim", children: "Lade Kontingent…" });
+  }, [load]);
+  const refresh = /* @__PURE__ */ jsx(HoverCtl, { children: /* @__PURE__ */ jsx(
+    "button",
+    {
+      className: "hv-opt",
+      disabled: busy,
+      onClick: () => void load(),
+      title: "Kontingent aktualisieren",
+      "aria-label": "Kontingent aktualisieren",
+      children: busy ? "…" : "↻"
+    }
+  ) });
+  if (!usage) {
+    return /* @__PURE__ */ jsxs("div", { className: "quota-usage", children: [
+      refresh,
+      /* @__PURE__ */ jsx("span", { className: "dim", children: failed ? "Kontingent nicht erreichbar" : "Lade Kontingent…" })
+    ] });
+  }
   if (!usage.available || !usage.windows.length) {
-    return /* @__PURE__ */ jsx("span", { className: "dim", children: "Keine Kontingentdaten verfügbar" });
+    return /* @__PURE__ */ jsxs("div", { className: "quota-usage", children: [
+      refresh,
+      /* @__PURE__ */ jsx("span", { className: "dim", children: "Keine Kontingentdaten verfügbar" })
+    ] });
   }
   return /* @__PURE__ */ jsxs("div", { className: "quota-usage", children: [
+    refresh,
     usage.windows.map((window2) => {
       const percent = progressPercent(window2.used_percent);
       const title = windowTitle(provider, window2.label);
