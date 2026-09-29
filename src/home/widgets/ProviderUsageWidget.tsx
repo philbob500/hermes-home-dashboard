@@ -207,11 +207,11 @@ export function ProviderUsageWidget() {
   // rejected key is not silently mistaken for "this provider is fine".
   if (balance || balanceFailed) {
     const amount = balance ? formatMoney(balance.total, balance.currency) : null;
+    // No window behind the credit, so the provider name itself carries the row.
     groups.push(
       <div className="usage-group" key="deepseek">
-        <span className="usage-head">deepseek</span>
         <div className="usage-row">
-          <span className="usage-win">guthaben</span>
+          <span className="usage-head">deepseek</span>
           <div className="usage-track usage-track-plain" />
           <span className="usage-value">
             <span className="usage-pct ok">{amount ?? "—"}</span>

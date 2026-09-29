@@ -296,6 +296,7 @@
 .home-widget .usage { display: flex; flex-direction: column; gap: 8px; }
 .home-widget .usage-group { display: flex; flex-direction: column; gap: 3px; }
 .home-widget .usage-head {
+  flex: none;
   font-size: 9px;
   letter-spacing: 0.08em;
   color: var(--home-accent-dim);
