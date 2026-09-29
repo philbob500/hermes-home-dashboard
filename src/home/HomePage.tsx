@@ -11,7 +11,19 @@ const LAYOUT_URL = "/api/plugins/home-dashboard/layout";
 
 function loadLayout(): Promise<HomeLayout> {
   return fetchJSON<{ layout: unknown }>(LAYOUT_URL)
-    .then((r) => (r.layout == null ? DEFAULT_LAYOUT : parseLayout(r.layout)))
+    .then(async (r) => {
+      if (r.layout == null) return DEFAULT_LAYOUT;
+      const layout = parseLayout(r.layout);
+      const rawVersion = typeof r.layout === "object" && r.layout !== null
+        ? (r.layout as Record<string, unknown>).version
+        : null;
+      if (rawVersion === 1) {
+        // Migrate the saved layout through the plugin API, preserving its
+        // placement and props while adding the first subscription tile once.
+        try { await saveLayout(layout); } catch { /* keep the migrated view in this session */ }
+      }
+      return layout;
+    })
     .catch(() => DEFAULT_LAYOUT);
 }
 
