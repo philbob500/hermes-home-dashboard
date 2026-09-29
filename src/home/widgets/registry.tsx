@@ -45,17 +45,6 @@ export interface WidgetDef {
   dataSource: HomeDataSource | null;
 }
 
-function providerUsageWidget(title: string, provider: "openai-codex" | "anthropic"): WidgetDef {
-  return {
-    title,
-    component: () => <ProviderUsageWidget provider={provider} />,
-    defaultSize: { gw: 4, gh: 3 },
-    minSize: { gw: 3, gh: 3 },
-    navigateTo: null,
-    dataSource: null,
-  };
-}
-
 /** Single registration point for home widgets. A future user-widget SDK
  *  plugs in here — nothing else in the home knows the widget list. */
 export const WIDGET_REGISTRY: Record<string, WidgetDef> = {
@@ -199,8 +188,12 @@ export const WIDGET_REGISTRY: Record<string, WidgetDef> = {
     defaultSize: { gw: 3, gh: 4 }, minSize: { gw: 2, gh: 3 },
     navigateTo: null, dataSource: null,
   },
-  codex: providerUsageWidget("codex", "openai-codex"),
-  claude: providerUsageWidget("claude", "anthropic"),
+  usage: {
+    title: "limits",
+    component: () => <ProviderUsageWidget />,
+    defaultSize: { gw: 4, gh: 3 }, minSize: { gw: 3, gh: 3 },
+    navigateTo: null, dataSource: null,
+  },
   agent: {
     title: "agent",
     component: ({ data }) => <AgentWidget data={data} />,

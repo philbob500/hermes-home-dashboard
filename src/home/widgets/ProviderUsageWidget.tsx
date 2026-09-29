@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { fetchJSON } from "../../sdk";
 import { HoverCtl } from "./HoverArrows";
 import {
   displayPercent,
+  formatMoney,
   progressPercent,
   timeToReset,
   windowTitle,
@@ -12,6 +13,12 @@ import {
  *  tile scrolled out of view costs nothing. */
 const POLL_MS = 2 * 60 * 1000;
 const CLOCK_MS = 60 * 1000;
+
+/** Providers with quota windows. Order is the order on the tile. */
+const QUOTA_PROVIDERS: { id: "openai-codex" | "anthropic"; name: string }[] = [
+  { id: "openai-codex", name: "codex" },
+  { id: "anthropic", name: "claude" },
+];
 
 export interface SubscriptionUsageWindow {
   label: string;
@@ -26,13 +33,25 @@ interface SubscriptionUsageResponse {
   windows: SubscriptionUsageWindow[];
 }
 
-interface Props {
-  provider: "openai-codex" | "anthropic";
+interface BalanceResponse {
+  provider: string;
+  available: boolean;
+  fetched_at: string | null;
+  peak: boolean;
+  currency?: string;
+  total?: number;
+  topped_up?: number;
+  granted?: number;
+  reason?: string;
 }
 
-/** Shared renderer for independent provider quota tiles. */
-export function ProviderUsageWidget({ provider }: Props) {
-  const [usage, setUsage] = useState<SubscriptionUsageResponse | null>(null);
+/** One tile for every limit that matters: subscription windows per provider,
+ *  plus prepaid credit for the providers that have no quota at all. */
+export function ProviderUsageWidget() {
+  const [usage, setUsage] = useState<Record<string, SubscriptionUsageResponse | null>>({});
+  const [balance, setBalance] = useState<BalanceResponse | null>(null);
+  const [balanceFailed, setBalanceFailed] = useState(false);
+  const [loadedOnce, setLoadedOnce] = useState(false);
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [now, setNow] = useState(Date.now());
@@ -44,18 +63,34 @@ export function ProviderUsageWidget({ provider }: Props) {
 
   const load = useCallback(async () => {
     setBusy(true);
+    const quota = await Promise.all(
+      QUOTA_PROVIDERS.map(async ({ id }) => {
+        try {
+          const result = await fetchJSON<SubscriptionUsageResponse>(
+            `/api/plugins/home-dashboard/subscription-usage/${encodeURIComponent(id)}`,
+          );
+          return [id, result] as const;
+        } catch {
+          return [id, null] as const;
+        }
+      }),
+    );
+    let credit: BalanceResponse | null = null;
+    let creditFailed = false;
     try {
-      const result = await fetchJSON<SubscriptionUsageResponse>(
-        `/api/plugins/home-dashboard/subscription-usage/${encodeURIComponent(provider)}`,
-      );
-      setUsage(result);
-      setFailed(false);
+      credit = await fetchJSON<BalanceResponse>("/api/plugins/home-dashboard/balance/deepseek");
     } catch {
-      setFailed(true);
-    } finally {
-      setBusy(false);
+      credit = null;
+      creditFailed = true;
     }
-  }, [provider]);
+
+    setUsage(Object.fromEntries(quota));
+    setBalance(credit);
+    setBalanceFailed(creditFailed);
+    setFailed(quota.every(([, value]) => value === null) && credit === null);
+    setLoadedOnce(true);
+    setBusy(false);
+  }, []);
 
   // First paint always needs data, even for a tile that starts below the fold.
   useEffect(() => {
@@ -104,93 +139,126 @@ export function ProviderUsageWidget({ provider }: Props) {
         className="hv-opt"
         disabled={busy}
         onClick={() => void load()}
-        title="Kontingent aktualisieren"
-        aria-label="Kontingent aktualisieren"
+        title="Kontingente aktualisieren"
+        aria-label="Kontingente aktualisieren"
       >
         {busy ? "…" : "↻"}
       </button>
     </HoverCtl>
   );
 
-  if (!usage) {
+  if (!loadedOnce) {
     return (
       <div className="usage" ref={setRoot}>
         {refresh}
-        <span className="dim">
-          {failed ? "Kontingent nicht erreichbar" : "Lade Kontingent…"}
-        </span>
+        <span className="dim">Lade Kontingente…</span>
       </div>
     );
   }
 
-  if (!usage.available || !usage.windows.length) {
-    return (
-      <div className="usage" ref={setRoot}>
-        {refresh}
-        <span className="dim">Keine Kontingentdaten verfügbar</span>
-      </div>
+  const rows: ReactNode[] = [];
+  for (const { id, name } of QUOTA_PROVIDERS) {
+    const data = usage[id];
+    if (!data?.available || !data.windows.length) {
+      rows.push(
+        <div className="usage-row" key={`${id}-empty`}>
+          <span className="usage-prov">{name}</span>
+          <span className="dim">keine Daten</span>
+        </div>,
+      );
+      continue;
+    }
+    data.windows.forEach((window, index) => {
+      const percent = progressPercent(window.used_percent);
+      const title = windowTitle(id, window.label);
+      const reset = timeToReset(window.reset_at, now);
+      const fillClass = percent !== null && percent >= 95
+        ? "fill usage-critical"
+        : percent !== null && percent >= 75
+          ? "fill usage-warning"
+          : "fill";
+      rows.push(
+        <div className="usage-row" key={`${id}-${window.label}-${index}`}>
+          {/* The provider names its group once; the following windows keep the
+            * same indent so the bars stay in one column. */}
+          <span className="usage-prov">{index === 0 ? name : ""}</span>
+          <span className="usage-win">{title}</span>
+          <div
+            className="usage-track"
+            role="progressbar"
+            aria-label={`${name} ${title}`}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={percent ?? undefined}
+            aria-valuetext={displayPercent(percent)}
+          >
+            {percent !== null && <div className={fillClass} style={{ width: `${percent}%` }} />}
+          </div>
+          <span className="usage-pct">{displayPercent(percent)}</span>
+          <span className="usage-reset dim" title={window.reset_at ?? ""}>
+            {reset ?? "—"}
+          </span>
+        </div>,
+      );
+    });
+  }
+
+  // The credit row stays visible when the read fails, so a missing route or a
+  // rejected key is not silently mistaken for "this provider is fine".
+  if (balance || balanceFailed) {
+    const amount = balance ? formatMoney(balance.total, balance.currency) : null;
+    rows.push(
+      <div className="usage-row" key="deepseek">
+        <span className="usage-prov">deepseek</span>
+        <span className="usage-win">Guthaben</span>
+        <div className="usage-track usage-track-plain" />
+        <span className="usage-pct ok">{amount ?? "—"}</span>
+        <span className="usage-reset dim">
+          {!balance ? "n/a" : balance.peak ? "Peak" : "Off-Peak"}
+        </span>
+      </div>,
     );
   }
+
+  // One "Stand" line for the whole tile: the newest of the three reads.
+  const stamps = [
+    usage["openai-codex"]?.fetched_at,
+    usage["anthropic"]?.fetched_at,
+    balance?.fetched_at,
+  ]
+    .filter((stamp): stamp is string => typeof stamp === "string")
+    .map((stamp) => Date.parse(stamp))
+    .filter((value) => Number.isFinite(value));
+  const newestStamp = stamps.length ? Math.max(...stamps) : null;
 
   return (
     <div className="usage" ref={setRoot}>
       {refresh}
-      {/* Shared meter rows: `.meters` puts them side by side once the tile is
-        * wide enough, so the bars use the width instead of a fixed slot. */}
-      <div className="meters">
-        {usage.windows.map((window, index) => {
-          const percent = progressPercent(window.used_percent);
-          const title = windowTitle(provider, window.label);
-          const fillClass = percent !== null && percent >= 95
-            ? "fill usage-critical"
-            : percent !== null && percent >= 75
-              ? "fill usage-warning"
-              : "fill";
-          return (
-            <div className="meter" key={`${window.label}:${window.reset_at ?? "none"}:${index}`}>
-              <span className="lbl">{title}</span>
-              <div
-                className="track"
-                role="progressbar"
-                aria-label={title}
-                aria-valuemin={0}
-                aria-valuemax={100}
-                aria-valuenow={percent ?? undefined}
-                aria-valuetext={displayPercent(percent)}
-              >
-                {percent !== null && (
-                  <div className={fillClass} style={{ width: `${percent}%` }} />
-                )}
-              </div>
-              <span className="val">{displayPercent(percent)}</span>
-            </div>
-          );
-        })}
-      </div>
-      {/* Shared totals line (Tokens footer): one compact row for the reset
-        * countdowns instead of a second right-aligned block per window. */}
-      <div className="tok-stats">
-        {usage.windows.map((window, index) => {
-          const reset = timeToReset(window.reset_at, now);
-          return (
-            <span key={`${window.label}:${index}`}>
-              <span className="dim">{windowTitle(provider, window.label)}</span>{" "}
-              {reset ? `Reset ${reset}` : "Reset unbekannt"}
+      {rows}
+      {failed && <span className="werr">Kontingente nicht erreichbar</span>}
+      <div className="hover-reveal">
+        <div className="tok-stats">
+          {balance?.topped_up !== undefined && balance.topped_up !== null && (
+            <span>
+              <span className="dim">aufgeladen</span> {formatMoney(balance.topped_up, balance.currency)}
             </span>
-          );
-        })}
-        {failed && <span className="werr">Aktualisierung fehlgeschlagen</span>}
-      </div>
-      {usage.fetched_at && (
-        <div className="hover-reveal">
-          <div className="tok-stats">
+          )}
+          {balance?.granted ? (
+            <span>
+              <span className="dim">guthaben</span> {formatMoney(balance.granted, balance.currency)}
+            </span>
+          ) : null}
+          {newestStamp && (
             <span>
               <span className="dim">Stand</span>{" "}
-              {new Date(usage.fetched_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              {new Date(newestStamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
             </span>
-          </div>
+          )}
+          <span>
+            <span className="dim">DeepSeek Peak</span> Mo–Fr 01:00–04:00, 06:00–10:00 UTC
+          </span>
         </div>
-      )}
+      </div>
     </div>
   );
 }

@@ -26,10 +26,9 @@ export const DEFAULT_LAYOUT: HomeLayout = {
     { id: "sessions", gx: 3, gy: 7, gw: 3, gh: 3 },
     { id: "cron",     gx: 6, gy: 7, gw: 3, gh: 3 },
     { id: "errors",   gx: 9, gy: 7, gw: 3, gh: 3 },
-    { id: "codex",    gx: 3, gy: 10, gw: 4, gh: 3 },
-    { id: "claude",   gx: 7, gy: 10, gw: 4, gh: 3 },
+    { id: "usage",    gx: 3, gy: 10, gw: 6, gh: 3 },
   ],
-  seeded: ["codex", "claude"],
+  seeded: ["usage"],
 };
 
 function isValidWidget(w: unknown): w is LayoutWidget {
@@ -58,40 +57,59 @@ function firstFreeSlot(widgets: LayoutWidget[], gw: number, gh: number): { gx: n
 /** Tiles the layout seeds by itself. Each one is offered exactly once: a
  *  document written before the tile existed gets it, and a document that
  *  already carries or already got it is left alone. */
-const SEEDED_TILES = ["codex", "claude"] as const;
+const SEEDED_TILES = ["usage"] as const;
+
+/** The per-provider quota tiles were folded into the single `usage` tile that
+ *  holds every provider. A layout carrying one of them keeps its slot. */
+const MERGED_TILES = new Set(["codex", "claude"]);
 
 /** Unknown/corrupt documents fall back to the default layout. */
 export function parseLayout(raw: unknown): HomeLayout {
   if (typeof raw !== "object" || raw === null) return DEFAULT_LAYOUT;
   const o = raw as Record<string, unknown>;
   if ((o.version !== 1 && o.version !== LAYOUT_VERSION) || !Array.isArray(o.widgets)) return DEFAULT_LAYOUT;
-  const widgets = o.widgets.filter(isValidWidget);
-  const present = new Set(widgets.map((widget) => widget.id));
+  const widgets: LayoutWidget[] = [];
   const seeded = new Set<string>(
     Array.isArray(o.seeded) ? (o.seeded as unknown[]).filter((id): id is string => typeof id === "string") : [],
   );
   const size = { gw: 4, gh: 3 };
 
+  // Fold a codex and/or claude tile into one usage tile at the first slot the
+  // pair used, dropping the second one instead of leaving a gap.
+  let folded = false;
+  for (const widget of o.widgets.filter(isValidWidget)) {
+    if (MERGED_TILES.has(widget.id)) {
+      if (!folded) {
+        // Wider than one of the two tiles, but never past the right edge and
+        // never narrower than the tile it replaces.
+        widgets.push({
+          id: "usage",
+          gx: widget.gx,
+          gy: widget.gy,
+          gw: Math.max(widget.gw, Math.min(6, 12 - widget.gx)),
+          gh: widget.gh,
+        });
+        folded = true;
+      }
+      continue;
+    }
+    widgets.push(widget);
+  }
+  seeded.delete("codex");
+  seeded.delete("claude");
+
   for (const id of SEEDED_TILES) {
-    if (present.has(id)) {
+    if (widgets.some((widget) => widget.id === id) || folded) {
+      seeded.add(id);
       continue;
     }
-    // A version-2 document that lacks Codex had it and lost it — the user
-    // removed it, so it is not the tile that is missing here.
-    if (id === "codex" && o.version !== 1) {
-      continue;
-    }
-    if (seeded.has(id)) {
+    // A version-2 document that never carried the tile means the user removed
+    // it — only a document written before the tile existed gets it seeded.
+    if (o.version !== 1 || seeded.has(id)) {
       continue;
     }
     widgets.push({ id, ...firstFreeSlot(widgets, size.gw, size.gh), ...size });
     seeded.add(id);
-  }
-
-  for (const id of SEEDED_TILES) {
-    if (widgets.some((widget) => widget.id === id)) {
-      seeded.add(id);
-    }
   }
 
   return { version: LAYOUT_VERSION, widgets, seeded: [...seeded] };

@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
@@ -154,4 +156,95 @@ async def get_subscription_usage(provider: str) -> Dict[str, Any]:
             }
             for window in snapshot.windows
         ],
+    }
+
+
+# DeepSeek exposes no quota windows — it is prepaid credit. Resetwatch reads the
+# same endpoint; the balance is the only number the provider publishes.
+DEEPSEEK_BALANCE_URL = "https://api.deepseek.com/user/balance"
+# Official peak windows, Monday-Friday UTC. Off-peak calls cost half price.
+DEEPSEEK_PEAK_WINDOWS_UTC = ((1, 4), (6, 10))
+
+
+def _api_key(name: str) -> str:
+    """Read a key from the process environment, else from this profile's .env."""
+    value = (os.environ.get(name) or "").strip()
+    if value:
+        return value
+    try:
+        for line in (get_hermes_home() / ".env").read_text("utf-8").splitlines():
+            key, separator, raw = line.partition("=")
+            if separator and key.strip() == name:
+                return raw.strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return ""
+
+
+def deepseek_peak_now(now: datetime | None = None) -> bool:
+    """True inside DeepSeek's peak pricing windows (Mon-Fri, UTC)."""
+    stamp = now or datetime.now(timezone.utc)
+    stamp = stamp.replace(tzinfo=timezone.utc) if stamp.tzinfo is None else stamp.astimezone(timezone.utc)
+    minutes = stamp.hour * 60 + stamp.minute
+    return stamp.weekday() < 5 and any(
+        start * 60 <= minutes < end * 60 for start, end in DEEPSEEK_PEAK_WINDOWS_UTC
+    )
+
+
+def _deepseek_money(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str) and value.strip():
+        try:
+            return float(value.strip().replace(",", ""))
+        except ValueError:
+            return None
+    return None
+
+
+def _fetch_deepseek_balance(key: str) -> Dict[str, Any]:
+    import httpx
+
+    with httpx.Client(timeout=10.0) as client:
+        response = client.get(
+            DEEPSEEK_BALANCE_URL,
+            headers={"Authorization": f"Bearer {key}", "Accept": "application/json"},
+        )
+        response.raise_for_status()
+        payload = response.json()
+    return payload if isinstance(payload, dict) else {}
+
+
+@router.get("/balance/deepseek")
+async def get_deepseek_balance() -> Dict[str, Any]:
+    """Prepaid credit of the DeepSeek account configured on this machine."""
+    peak = deepseek_peak_now()
+    key = _api_key("DEEPSEEK_API_KEY")
+    if not key:
+        return {"provider": "deepseek", "available": False, "fetched_at": None, "peak": peak, "reason": "no_api_key"}
+    try:
+        payload = await asyncio.to_thread(_fetch_deepseek_balance, key)
+    except Exception:
+        return {"provider": "deepseek", "available": False, "fetched_at": None, "peak": peak, "reason": "unreachable"}
+
+    infos = [item for item in payload.get("balance_infos") or [] if isinstance(item, dict)]
+    chosen = next(
+        (item for item in infos if str(item.get("currency") or "").strip().upper() == "USD"),
+        infos[0] if infos else None,
+    )
+    total = _deepseek_money((chosen or {}).get("total_balance"))
+    if chosen is None or total is None:
+        return {"provider": "deepseek", "available": False, "fetched_at": None, "peak": peak, "reason": "no_balance"}
+
+    return {
+        "provider": "deepseek",
+        "available": payload.get("is_available") is not False,
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+        "peak": peak,
+        "currency": str(chosen.get("currency") or "USD").strip().upper() or "USD",
+        "total": total,
+        "topped_up": _deepseek_money(chosen.get("topped_up_balance")),
+        "granted": _deepseek_money(chosen.get("granted_balance")),
     }

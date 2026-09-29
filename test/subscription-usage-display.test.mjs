@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   displayPercent,
+  formatMoney,
   progressPercent,
   timeToReset,
   windowTitle,
@@ -29,4 +30,12 @@ test("reset time is shown as a compact countdown", () => {
   assert.equal(timeToReset("2026-09-29T14:15:00Z", now), "in 2h 15m");
   assert.equal(timeToReset("2026-09-29T12:00:00Z", now), "jetzt");
   assert.equal(timeToReset(null, now), null);
+});
+
+test("prepaid credit keeps its currency and never invents an amount", () => {
+  assert.equal(formatMoney(2.8, "USD"), "$2.80");
+  assert.equal(formatMoney(12, "CNY"), "¥12.00");
+  assert.equal(formatMoney(4.5, "chf"), "4.50 CHF");
+  assert.equal(formatMoney(null, "USD"), null);
+  assert.equal(formatMoney(Number.NaN, "USD"), null);
 });

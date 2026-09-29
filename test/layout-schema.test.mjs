@@ -5,7 +5,7 @@ import { LAYOUT_VERSION, parseLayout } from "../src/home/layout-schema.ts";
 
 const ids = (layout) => layout.widgets.map((widget) => widget.id);
 
-test("a pre-codex document keeps user placement and gains both seeded tiles", () => {
+test("a document written before the limits tile gains it", () => {
   const layout = parseLayout({
     version: 1,
     widgets: [{ id: "clock", gx: 2, gy: 1, gw: 5, gh: 3, props: { format: "24" } }],
@@ -16,41 +16,53 @@ test("a pre-codex document keeps user placement and gains both seeded tiles", ()
   assert.deepEqual(layout.widgets[0], {
     id: "clock", gx: 2, gy: 1, gw: 5, gh: 3, props: { format: "24" },
   });
-  assert.equal(ids(layout).filter((id) => id === "codex").length, 1);
-  assert.equal(ids(layout).filter((id) => id === "claude").length, 1);
-  assert.deepEqual(layout.seeded?.slice().sort(), ["claude", "codex"]);
+  assert.equal(ids(layout).filter((id) => id === "usage").length, 1);
+  assert.deepEqual(layout.seeded, ["usage"]);
 });
 
-test("a version-2 document gains the newer tile once, and only once", () => {
-  const migrated = parseLayout({
-    version: 2,
-    widgets: [{ id: "clock", gx: 0, gy: 0, gw: 5, gh: 3 }],
-  });
-
-  assert.deepEqual(ids(migrated), ["clock", "claude"]);
-
-  const again = parseLayout(JSON.parse(JSON.stringify(migrated)));
-
-  assert.deepEqual(ids(again), ["clock", "claude"]);
-});
-
-test("codex is not re-added to a version-2 document that lost it", () => {
-  const layout = parseLayout({
-    version: 2,
-    widgets: [{ id: "clock", gx: 0, gy: 0, gw: 5, gh: 3 }],
-  });
-
-  assert.equal(ids(layout).includes("codex"), false);
-});
-
-test("a tile the user removed stays removed", () => {
+test("a codex and claude pair becomes one limits tile in the first slot", () => {
   const layout = parseLayout({
     version: 2,
     seeded: ["codex", "claude"],
+    widgets: [
+      { id: "clock", gx: 0, gy: 0, gw: 5, gh: 3 },
+      { id: "codex", gx: 3, gy: 10, gw: 4, gh: 3 },
+      { id: "claude", gx: 7, gy: 10, gw: 4, gh: 3 },
+    ],
+  });
+
+  assert.deepEqual(ids(layout), ["clock", "usage"]);
+  assert.deepEqual(layout.widgets[1], { id: "usage", gx: 3, gy: 10, gw: 6, gh: 3 });
+  assert.deepEqual(layout.seeded, ["usage"]);
+});
+
+test("the fold never pushes the tile past the right edge", () => {
+  const layout = parseLayout({
+    version: 2,
+    widgets: [{ id: "codex", gx: 10, gy: 0, gw: 2, gh: 3 }],
+  });
+
+  assert.deepEqual(layout.widgets, [{ id: "usage", gx: 10, gy: 0, gw: 2, gh: 3 }]);
+});
+
+test("a limits tile the user removed stays removed", () => {
+  const layout = parseLayout({
+    version: 2,
+    seeded: ["usage"],
     widgets: [{ id: "clock", gx: 0, gy: 0, gw: 5, gh: 3 }],
   });
 
   assert.deepEqual(ids(layout), ["clock"]);
+});
+
+test("an existing limits tile keeps its placement", () => {
+  const layout = parseLayout({
+    version: 2,
+    widgets: [{ id: "usage", gx: 6, gy: 4, gw: 4, gh: 3 }],
+  });
+
+  assert.deepEqual(layout.widgets, [{ id: "usage", gx: 6, gy: 4, gw: 4, gh: 3 }]);
+  assert.deepEqual(layout.seeded, ["usage"]);
 });
 
 test("an unusable document falls back to the default layout", () => {

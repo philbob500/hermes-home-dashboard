@@ -289,22 +289,34 @@
   transition: width 0.6s ease;
 }
 .home-widget .meter .val { width: 44px; text-align: right; font-size: 10px; }
-/* ── provider quota tiles (codex, claude) ──
- * They reuse the shared pieces: `.meters` for the bars (two columns once the
- * tile is wide enough) and the Tokens `.tok-stats` line for the countdowns.
- * Only the label slot, a taller bar and the two state fills are local. */
-.home-widget .usage .meter { margin: 5px 0; }
-.home-widget .usage .meter .lbl { width: 48px; white-space: nowrap; }
-.home-widget .usage .meter .track { height: 10px; }
-.home-widget .usage .tok-stats { margin-top: 5px; }
+/* ── limits tile: one row per window, every provider in the same column ──
+ * A table, not columns: the provider names its group once, then each window
+ * gets its own bar row, so bars, percentages and countdowns stay aligned. */
+.home-widget .usage { display: flex; flex-direction: column; gap: 1px; }
+.home-widget .usage-row { display: flex; align-items: center; gap: 6px; }
+.home-widget .usage-prov {
+  flex: none;
+  width: 52px;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--home-accent-dim);
+}
+.home-widget .usage-win { flex: none; width: 44px; font-size: 10px; }
+.home-widget .usage-track {
+  flex: 1;
+  min-width: 24px;
+  height: 9px;
+  border-radius: 2px;
+  background: rgb(255 255 255 / 0.07);
+  overflow: hidden;
+}
+.home-widget .usage-track-plain { background: none; }
+.home-widget .usage-pct { flex: none; width: 46px; text-align: right; font-size: 10px; font-variant-numeric: tabular-nums; }
+.home-widget .usage-reset { flex: none; width: 52px; text-align: right; font-size: 9px; white-space: nowrap; }
+.home-widget .usage .tok-stats { margin-top: 0; }
 .home-widget .usage-critical { background: var(--home-error); }
 .home-widget .usage-warning { background: var(--color-warning, var(--home-accent)); }
-/* The shared `.meters` breakpoint (380px) is tuned for the Host meter stack;
- * a 4-column quota tile sits under it in most layouts, so the two windows
- * would stay stacked. Lower it here instead of duplicating the styles. */
-@container (min-width: 280px) {
-  .home-widget .usage .meters { columns: 2; }
-}
 
 .home-widget .ok { color: var(--home-accent); }
 .home-widget .dim { color: var(--color-muted-foreground, #6b7387); }

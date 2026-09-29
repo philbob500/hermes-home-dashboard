@@ -8,6 +8,16 @@ export function displayPercent(value: number | null | undefined): string {
   return progress === null ? "—" : `${Math.round(progress)}%`;
 }
 
+const CURRENCY_SIGNS: Record<string, string> = { USD: "$", CNY: "¥", EUR: "€" };
+
+/** Prepaid credit as a compact amount: `$2.80`, `¥1,20`, `12.00 CHF`. */
+export function formatMoney(amount: number | null | undefined, currency: string | undefined): string | null {
+  if (typeof amount !== "number" || !Number.isFinite(amount)) return null;
+  const code = (currency || "USD").trim().toUpperCase() || "USD";
+  const sign = CURRENCY_SIGNS[code];
+  return sign ? `${sign}${amount.toFixed(2)}` : `${amount.toFixed(2)} ${code}`;
+}
+
 const WINDOW_TITLES: Record<string, Record<string, string>> = {
   "openai-codex": { weekly: "Woche" },
   anthropic: {
