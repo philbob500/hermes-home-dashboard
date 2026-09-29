@@ -289,14 +289,21 @@
   transition: width 0.6s ease;
 }
 .home-widget .meter .val { width: 44px; text-align: right; font-size: 10px; }
-/* ── limits tile: one row per window ──
- * `name · bar · value` — the bar takes what the labels do not need, and the
- * percentage sits next to its own bar with the countdown right behind it. */
-.home-widget .usage { display: flex; flex-direction: column; gap: 5px; }
+/* ── limits tile: provider groups, one row per window ──
+ * `window · bar · value` per row, the provider naming its group once. The bar
+ * takes what the labels do not need, and the percentage sits next to its own
+ * bar with the countdown right behind it. */
+.home-widget .usage { display: flex; flex-direction: column; gap: 8px; }
+.home-widget .usage-group { display: flex; flex-direction: column; gap: 3px; }
+.home-widget .usage-head {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  color: var(--home-accent-dim);
+}
 .home-widget .usage-row { display: flex; align-items: center; gap: 8px; }
-.home-widget .usage-name {
+.home-widget .usage-win {
   flex: none;
-  width: 100px;
+  width: 58px;
   font-size: 10px;
   white-space: nowrap;
   overflow: hidden;
@@ -331,7 +338,7 @@
  * column, so the bars share both edges and the numbers line up. */
 .home-widget .usage-pct { width: 34px; text-align: right; }
 .home-widget .usage-reset {
-  width: 62px;
+  width: 74px;
   text-align: right;
   font-size: 9px;
   white-space: nowrap;

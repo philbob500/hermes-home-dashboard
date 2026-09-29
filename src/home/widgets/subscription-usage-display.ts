@@ -18,18 +18,21 @@ export function formatMoney(amount: number | null | undefined, currency: string 
   return sign ? `${sign}${amount.toFixed(2)}` : `${amount.toFixed(2)} ${code}`;
 }
 
+/** Short, lower-case window names: the tile rows must stay narrow, and the
+ *  dashboard writes its other rows lower-case too (cpu, ram, disk). */
 const WINDOW_TITLES: Record<string, Record<string, string>> = {
-  "openai-codex": { weekly: "Woche" },
+  "openai-codex": { weekly: "week", session: "session" },
   anthropic: {
-    "current session": "Session",
-    "current week": "Woche",
-    "opus week": "Opus-Woche",
-    "sonnet week": "Sonnet-Woche",
+    "current session": "session",
+    "current week": "week",
+    "opus week": "opus",
+    "sonnet week": "sonnet",
   },
 };
 
 export function windowTitle(provider: string, label: string): string {
-  return WINDOW_TITLES[provider]?.[label.trim().toLowerCase()] ?? label;
+  const trimmed = label.trim();
+  return WINDOW_TITLES[provider]?.[trimmed.toLowerCase()] ?? trimmed.toLowerCase();
 }
 
 export function timeToReset(resetAt: string | null | undefined, nowMs = Date.now()): string | null {

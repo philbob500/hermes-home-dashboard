@@ -19,10 +19,13 @@ test("subscription percentages are clamped and missing values stay explicit", ()
 });
 
 test("Codex and Claude windows share concise dashboard labels", () => {
-  assert.equal(windowTitle("openai-codex", "Weekly"), "Woche");
-  assert.equal(windowTitle("anthropic", "Current session"), "Session");
-  assert.equal(windowTitle("anthropic", "Current week"), "Woche");
-  assert.equal(windowTitle("anthropic", "Opus week"), "Opus-Woche");
+  assert.equal(windowTitle("openai-codex", "Weekly"), "week");
+  assert.equal(windowTitle("anthropic", "Current session"), "session");
+  assert.equal(windowTitle("anthropic", "Current week"), "week");
+  assert.equal(windowTitle("anthropic", "Opus week"), "opus");
+  // An unmapped label still shows up short and lower-case, never as raw "5H".
+  assert.equal(windowTitle("openai-codex", " Session "), "session");
+  assert.equal(windowTitle("unknown", "Rolling 5H"), "rolling 5h");
 });
 
 test("reset time is shown as a compact countdown", () => {

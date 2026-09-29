@@ -156,66 +156,70 @@ export function ProviderUsageWidget() {
     );
   }
 
-  const rows: ReactNode[] = [];
+  // One labelled block per provider: the provider names the group once, and
+  // its windows are single rows under it — `label · bar · value`.
+  const groups: ReactNode[] = [];
   for (const { id, name } of QUOTA_PROVIDERS) {
     const data = usage[id];
-    if (!data?.available || !data.windows.length) {
-      rows.push(
-        <div className="usage-row" key={`${id}-empty`}>
-          <span className="usage-name">{name}</span>
-          <span className="dim">keine Daten</span>
-        </div>,
-      );
-      continue;
-    }
-    data.windows.forEach((window, index) => {
-      const percent = progressPercent(window.used_percent);
-      const title = windowTitle(id, window.label);
-      const reset = timeToReset(window.reset_at, now);
-      const fillClass = percent !== null && percent >= 95
-        ? "fill usage-critical"
-        : percent !== null && percent >= 75
-          ? "fill usage-warning"
-          : "fill";
-      rows.push(
-        <div className="usage-row" key={`${id}-${window.label}-${index}`}>
-          <span className="usage-name">{`${name} ${title}`}</span>
-          <div
-            className="usage-track"
-            role="progressbar"
-            aria-label={`${name} ${title}`}
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={percent ?? undefined}
-            aria-valuetext={displayPercent(percent)}
-          >
-            {percent !== null && <div className={fillClass} style={{ width: `${percent}%` }} />}
-          </div>
-          <span className="usage-value">
-            <span className="usage-pct">{displayPercent(percent)}</span>
-            <span className="usage-reset dim" title={window.reset_at ?? ""}>
-              {reset ? `· ${reset}` : "—"}
-            </span>
-          </span>
-        </div>,
-      );
-    });
+    const windows = data?.available ? data.windows : [];
+    groups.push(
+      <div className="usage-group" key={id}>
+        <span className="usage-head">{name}</span>
+        {windows.length
+          ? windows.map((window, index) => {
+              const percent = progressPercent(window.used_percent);
+              const title = windowTitle(id, window.label);
+              const reset = timeToReset(window.reset_at, now);
+              const fillClass = percent !== null && percent >= 95
+                ? "fill usage-critical"
+                : percent !== null && percent >= 75
+                  ? "fill usage-warning"
+                  : "fill";
+              return (
+                <div className="usage-row" key={`${id}-${window.label}-${index}`}>
+                  <span className="usage-win">{title}</span>
+                  <div
+                    className="usage-track"
+                    role="progressbar"
+                    aria-label={`${name} ${title}`}
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={percent ?? undefined}
+                    aria-valuetext={displayPercent(percent)}
+                  >
+                    {percent !== null && <div className={fillClass} style={{ width: `${percent}%` }} />}
+                  </div>
+                  <span className="usage-value">
+                    <span className="usage-pct">{displayPercent(percent)}</span>
+                    <span className="usage-reset dim" title={window.reset_at ?? ""}>
+                      {reset ? `· ${reset}` : "—"}
+                    </span>
+                  </span>
+                </div>
+              );
+            })
+          : <span className="dim">keine Daten</span>}
+      </div>,
+    );
   }
 
   // The credit row stays visible when the read fails, so a missing route or a
   // rejected key is not silently mistaken for "this provider is fine".
   if (balance || balanceFailed) {
     const amount = balance ? formatMoney(balance.total, balance.currency) : null;
-    rows.push(
-      <div className="usage-row" key="deepseek">
-        <span className="usage-name">DeepSeek</span>
-        <div className="usage-track usage-track-plain" />
-        <span className="usage-value">
-          <span className="usage-pct ok">{amount ?? "—"}</span>
-          <span className="usage-reset dim">
-            {!balance ? "n/a" : balance.peak ? "· Peak" : "· Off-Peak"}
+    groups.push(
+      <div className="usage-group" key="deepseek">
+        <span className="usage-head">deepseek</span>
+        <div className="usage-row">
+          <span className="usage-win">guthaben</span>
+          <div className="usage-track usage-track-plain" />
+          <span className="usage-value">
+            <span className="usage-pct ok">{amount ?? "—"}</span>
+            <span className="usage-reset dim">
+              {!balance ? "n/a" : balance.peak ? "peak" : "off-peak"}
+            </span>
           </span>
-        </span>
+        </div>
       </div>,
     );
   }
@@ -234,7 +238,7 @@ export function ProviderUsageWidget() {
   return (
     <div className="usage" ref={setRoot}>
       {refresh}
-      {rows}
+      {groups}
       {failed && <span className="werr">Kontingente nicht erreichbar</span>}
       <div className="hover-reveal">
         <div className="tok-stats">

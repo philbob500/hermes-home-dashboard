@@ -26,7 +26,7 @@ export const DEFAULT_LAYOUT: HomeLayout = {
     { id: "sessions", gx: 3, gy: 7, gw: 3, gh: 3 },
     { id: "cron",     gx: 6, gy: 7, gw: 3, gh: 3 },
     { id: "errors",   gx: 9, gy: 7, gw: 3, gh: 3 },
-    { id: "usage",    gx: 3, gy: 10, gw: 6, gh: 3 },
+    { id: "usage",    gx: 3, gy: 10, gw: 6, gh: 4 },
   ],
   seeded: ["usage"],
 };
