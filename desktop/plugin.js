@@ -1676,13 +1676,18 @@ function timeToReset(resetAt, nowMs = Date.now()) {
   if (hours) return `in ${hours}h ${remainder}m`;
   return `in ${remainder}m`;
 }
-const POLL_MS$1 = 5 * 60 * 1e3;
+const POLL_MS$1 = 2 * 60 * 1e3;
 const CLOCK_MS = 60 * 1e3;
 function ProviderUsageWidget({ provider }) {
   const [usage, setUsage] = useState(null);
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [now, setNow] = useState(Date.now());
+  const [onScreen, setOnScreen] = useState(true);
+  const [pageVisible, setPageVisible] = useState(
+    () => typeof document === "undefined" || document.visibilityState === "visible"
+  );
+  const [root, setRoot] = useState(null);
   const load = useCallback(async () => {
     setBusy(true);
     try {
@@ -1699,13 +1704,37 @@ function ProviderUsageWidget({ provider }) {
   }, [provider]);
   useEffect(() => {
     void load();
-    const poll = setInterval(() => void load(), POLL_MS$1);
-    const clock = setInterval(() => setNow(Date.now()), CLOCK_MS);
-    return () => {
-      clearInterval(poll);
-      clearInterval(clock);
-    };
   }, [load]);
+  useEffect(() => {
+    if (!root || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver((entries) => {
+      setOnScreen(entries.some((entry) => entry.isIntersecting));
+    });
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, [root]);
+  useEffect(() => {
+    const update = () => setPageVisible(document.visibilityState === "visible");
+    document.addEventListener("visibilitychange", update);
+    return () => document.removeEventListener("visibilitychange", update);
+  }, []);
+  useEffect(() => {
+    const clock = setInterval(() => setNow(Date.now()), CLOCK_MS);
+    return () => clearInterval(clock);
+  }, []);
+  const live = onScreen && pageVisible;
+  const wasLive = useRef(live);
+  useEffect(() => {
+    if (!live) {
+      wasLive.current = false;
+      return;
+    }
+    const returning = !wasLive.current;
+    wasLive.current = true;
+    if (returning) void load();
+    const poll = setInterval(() => void load(), POLL_MS$1);
+    return () => clearInterval(poll);
+  }, [live, load]);
   const refresh = /* @__PURE__ */ jsx(HoverCtl, { children: /* @__PURE__ */ jsx(
     "button",
     {
@@ -1718,18 +1747,18 @@ function ProviderUsageWidget({ provider }) {
     }
   ) });
   if (!usage) {
-    return /* @__PURE__ */ jsxs("div", { className: "quota-usage", children: [
+    return /* @__PURE__ */ jsxs("div", { className: "quota-usage", ref: setRoot, children: [
       refresh,
       /* @__PURE__ */ jsx("span", { className: "dim", children: failed ? "Kontingent nicht erreichbar" : "Lade Kontingent…" })
     ] });
   }
   if (!usage.available || !usage.windows.length) {
-    return /* @__PURE__ */ jsxs("div", { className: "quota-usage", children: [
+    return /* @__PURE__ */ jsxs("div", { className: "quota-usage", ref: setRoot, children: [
       refresh,
       /* @__PURE__ */ jsx("span", { className: "dim", children: "Keine Kontingentdaten verfügbar" })
     ] });
   }
-  return /* @__PURE__ */ jsxs("div", { className: "quota-usage", children: [
+  return /* @__PURE__ */ jsxs("div", { className: "quota-usage", ref: setRoot, children: [
     refresh,
     usage.windows.map((window2) => {
       const percent = progressPercent(window2.used_percent);

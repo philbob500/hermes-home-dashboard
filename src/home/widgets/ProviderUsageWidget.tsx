@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { fetchJSON } from "../../sdk";
 import { HoverCtl } from "./HoverArrows";
 import {
@@ -8,7 +8,9 @@ import {
   windowTitle,
 } from "./subscription-usage-display";
 
-const POLL_MS = 5 * 60 * 1000;
+/** Poll cadence while the tile is actually on screen. A hidden window or a
+ *  tile scrolled out of view costs nothing. */
+const POLL_MS = 2 * 60 * 1000;
 const CLOCK_MS = 60 * 1000;
 
 export interface SubscriptionUsageWindow {
@@ -34,6 +36,11 @@ export function ProviderUsageWidget({ provider }: Props) {
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [now, setNow] = useState(Date.now());
+  const [onScreen, setOnScreen] = useState(true);
+  const [pageVisible, setPageVisible] = useState(
+    () => typeof document === "undefined" || document.visibilityState === "visible",
+  );
+  const [root, setRoot] = useState<HTMLDivElement | null>(null);
 
   const load = useCallback(async () => {
     setBusy(true);
@@ -50,15 +57,46 @@ export function ProviderUsageWidget({ provider }: Props) {
     }
   }, [provider]);
 
+  // First paint always needs data, even for a tile that starts below the fold.
   useEffect(() => {
     void load();
-    const poll = setInterval(() => void load(), POLL_MS);
-    const clock = setInterval(() => setNow(Date.now()), CLOCK_MS);
-    return () => {
-      clearInterval(poll);
-      clearInterval(clock);
-    };
   }, [load]);
+
+  useEffect(() => {
+    if (!root || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver((entries) => {
+      setOnScreen(entries.some((entry) => entry.isIntersecting));
+    });
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, [root]);
+
+  useEffect(() => {
+    const update = () => setPageVisible(document.visibilityState === "visible");
+    document.addEventListener("visibilitychange", update);
+    return () => document.removeEventListener("visibilitychange", update);
+  }, []);
+
+  useEffect(() => {
+    const clock = setInterval(() => setNow(Date.now()), CLOCK_MS);
+    return () => clearInterval(clock);
+  }, []);
+
+  // Refresh automatically only while the tile is visible; coming back into
+  // view or into the window refreshes at once instead of waiting for the tick.
+  const live = onScreen && pageVisible;
+  const wasLive = useRef(live);
+  useEffect(() => {
+    if (!live) {
+      wasLive.current = false;
+      return;
+    }
+    const returning = !wasLive.current;
+    wasLive.current = true;
+    if (returning) void load();
+    const poll = setInterval(() => void load(), POLL_MS);
+    return () => clearInterval(poll);
+  }, [live, load]);
 
   const refresh = (
     <HoverCtl>
@@ -76,7 +114,7 @@ export function ProviderUsageWidget({ provider }: Props) {
 
   if (!usage) {
     return (
-      <div className="quota-usage">
+      <div className="quota-usage" ref={setRoot}>
         {refresh}
         <span className="dim">
           {failed ? "Kontingent nicht erreichbar" : "Lade Kontingent…"}
@@ -87,7 +125,7 @@ export function ProviderUsageWidget({ provider }: Props) {
 
   if (!usage.available || !usage.windows.length) {
     return (
-      <div className="quota-usage">
+      <div className="quota-usage" ref={setRoot}>
         {refresh}
         <span className="dim">Keine Kontingentdaten verfügbar</span>
       </div>
@@ -95,7 +133,7 @@ export function ProviderUsageWidget({ provider }: Props) {
   }
 
   return (
-    <div className="quota-usage">
+    <div className="quota-usage" ref={setRoot}>
       {refresh}
       {usage.windows.map((window) => {
         const percent = progressPercent(window.used_percent);
