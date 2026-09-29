@@ -200,6 +200,7 @@ export const WIDGET_REGISTRY: Record<string, WidgetDef> = {
     navigateTo: null, dataSource: null,
   },
   codex: providerUsageWidget("codex", "openai-codex"),
+  claude: providerUsageWidget("claude", "anthropic"),
   agent: {
     title: "agent",
     component: ({ data }) => <AgentWidget data={data} />,

@@ -1773,18 +1773,15 @@ function ProviderUsageWidget({ provider }) {
             {
               className: "track",
               role: "progressbar",
-              "aria-label": `${title} genutzt`,
+              "aria-label": title,
               "aria-valuemin": 0,
               "aria-valuemax": 100,
               "aria-valuenow": percent ?? void 0,
-              "aria-valuetext": `${displayPercent(percent)} genutzt`,
+              "aria-valuetext": displayPercent(percent),
               children: percent !== null && /* @__PURE__ */ jsx("div", { className: fillClass, style: { width: `${percent}%` } })
             }
           ),
-          /* @__PURE__ */ jsxs("span", { className: "val", children: [
-            displayPercent(percent),
-            " genutzt"
-          ] })
+          /* @__PURE__ */ jsx("span", { className: "val", children: displayPercent(percent) })
         ] }),
         /* @__PURE__ */ jsx("div", { className: "quota-reset dim", children: reset ? `Reset ${reset}` : "Resetzeit unbekannt" })
       ] }, `${window2.label}:${window2.reset_at ?? "none"}`);
@@ -2492,6 +2489,7 @@ const WIDGET_REGISTRY = {
     dataSource: null
   },
   codex: providerUsageWidget("codex", "openai-codex"),
+  claude: providerUsageWidget("claude", "anthropic"),
   agent: {
     title: "agent",
     component: ({ data }) => /* @__PURE__ */ jsx(AgentWidget, { data }),
@@ -3299,8 +3297,10 @@ const DEFAULT_LAYOUT = {
     { id: "sessions", gx: 3, gy: 7, gw: 3, gh: 3 },
     { id: "cron", gx: 6, gy: 7, gw: 3, gh: 3 },
     { id: "errors", gx: 9, gy: 7, gw: 3, gh: 3 },
-    { id: "codex", gx: 3, gy: 10, gw: 4, gh: 3 }
-  ]
+    { id: "codex", gx: 3, gy: 10, gw: 4, gh: 3 },
+    { id: "claude", gx: 7, gy: 10, gw: 4, gh: 3 }
+  ],
+  seeded: ["codex", "claude"]
 };
 function isValidWidget(w) {
   if (typeof w !== "object" || w === null) return false;
@@ -3319,24 +3319,46 @@ function firstFreeSlot(widgets, gw, gh) {
   }
   return { gx: 0, gy: maxRow };
 }
+const SEEDED_TILES = ["codex", "claude"];
 function parseLayout(raw) {
   if (typeof raw !== "object" || raw === null) return DEFAULT_LAYOUT;
   const o = raw;
   if (o.version !== 1 && o.version !== LAYOUT_VERSION || !Array.isArray(o.widgets)) return DEFAULT_LAYOUT;
   const widgets = o.widgets.filter(isValidWidget);
-  if (o.version === 1 && !widgets.some((widget) => widget.id === "codex")) {
-    const size = { gw: 4, gh: 3 };
-    widgets.push({ id: "codex", ...firstFreeSlot(widgets, size.gw, size.gh), ...size });
+  const present = new Set(widgets.map((widget) => widget.id));
+  const seeded = new Set(
+    Array.isArray(o.seeded) ? o.seeded.filter((id) => typeof id === "string") : []
+  );
+  const size = { gw: 4, gh: 3 };
+  for (const id of SEEDED_TILES) {
+    if (present.has(id)) {
+      continue;
+    }
+    if (id === "codex" && o.version !== 1) {
+      continue;
+    }
+    if (seeded.has(id)) {
+      continue;
+    }
+    widgets.push({ id, ...firstFreeSlot(widgets, size.gw, size.gh), ...size });
+    seeded.add(id);
   }
-  return { version: LAYOUT_VERSION, widgets };
+  for (const id of SEEDED_TILES) {
+    if (widgets.some((widget) => widget.id === id)) {
+      seeded.add(id);
+    }
+  }
+  return { version: LAYOUT_VERSION, widgets, seeded: [...seeded] };
 }
 const LAYOUT_URL = "/api/plugins/home-dashboard/layout";
 function loadLayout() {
   return fetchJSON(LAYOUT_URL).then(async (r) => {
     if (r.layout == null) return DEFAULT_LAYOUT;
     const layout = parseLayout(r.layout);
-    const rawVersion = typeof r.layout === "object" && r.layout !== null ? r.layout.version : null;
-    if (rawVersion === 1) {
+    const rawDoc = r.layout;
+    const rawVersion = typeof rawDoc.version === "number" ? rawDoc.version : null;
+    const rawSeeded = Array.isArray(rawDoc.seeded) ? rawDoc.seeded.length : -1;
+    if (rawVersion !== layout.version || rawSeeded !== (layout.seeded?.length ?? 0)) {
       try {
         await saveLayout(layout);
       } catch {

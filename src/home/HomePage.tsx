@@ -16,13 +16,14 @@ function loadLayout(): Promise<HomeLayout> {
     .then(async (r) => {
       if (r.layout == null) return DEFAULT_LAYOUT;
       const layout = parseLayout(r.layout);
-      const rawVersion = typeof r.layout === "object" && r.layout !== null
-        ? (r.layout as Record<string, unknown>).version
-        : null;
-      if (rawVersion === 1) {
-        // Migrate the saved layout through the plugin API, preserving its
-        // placement and props while adding the first subscription tile once.
-        try { await saveLayout(layout); } catch { /* keep the migrated view in this session */ }
+      const rawDoc = r.layout as Record<string, unknown>;
+      const rawVersion = typeof rawDoc.version === "number" ? rawDoc.version : null;
+      const rawSeeded = Array.isArray(rawDoc.seeded) ? rawDoc.seeded.length : -1;
+      // Persist through the plugin API when parsing changed the document —
+      // that is what makes a newly seeded tile stick and a removed one stay
+      // removed on the next load.
+      if (rawVersion !== layout.version || rawSeeded !== (layout.seeded?.length ?? 0)) {
+        try { await saveLayout(layout); } catch { /* keep the parsed view in this session */ }
       }
       return layout;
     })

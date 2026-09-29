@@ -7,6 +7,10 @@ export interface LayoutWidget {
 export interface HomeLayout {
   version: number;
   widgets: LayoutWidget[];
+  /** Tiles this document has already been offered. A newly introduced tile
+   *  appears once without a layout-version bump, and a tile the user removed
+   *  stays removed because its id is recorded here. */
+  seeded?: string[];
 }
 
 /** Factory layout — the approved home-rice-v2 mockup composition. */
@@ -23,7 +27,9 @@ export const DEFAULT_LAYOUT: HomeLayout = {
     { id: "cron",     gx: 6, gy: 7, gw: 3, gh: 3 },
     { id: "errors",   gx: 9, gy: 7, gw: 3, gh: 3 },
     { id: "codex",    gx: 3, gy: 10, gw: 4, gh: 3 },
+    { id: "claude",   gx: 7, gy: 10, gw: 4, gh: 3 },
   ],
+  seeded: ["codex", "claude"],
 };
 
 function isValidWidget(w: unknown): w is LayoutWidget {
@@ -49,15 +55,44 @@ function firstFreeSlot(widgets: LayoutWidget[], gw: number, gh: number): { gx: n
   return { gx: 0, gy: maxRow };
 }
 
+/** Tiles the layout seeds by itself. Each one is offered exactly once: a
+ *  document written before the tile existed gets it, and a document that
+ *  already carries or already got it is left alone. */
+const SEEDED_TILES = ["codex", "claude"] as const;
+
 /** Unknown/corrupt documents fall back to the default layout. */
 export function parseLayout(raw: unknown): HomeLayout {
   if (typeof raw !== "object" || raw === null) return DEFAULT_LAYOUT;
   const o = raw as Record<string, unknown>;
   if ((o.version !== 1 && o.version !== LAYOUT_VERSION) || !Array.isArray(o.widgets)) return DEFAULT_LAYOUT;
   const widgets = o.widgets.filter(isValidWidget);
-  if (o.version === 1 && !widgets.some((widget) => widget.id === "codex")) {
-    const size = { gw: 4, gh: 3 };
-    widgets.push({ id: "codex", ...firstFreeSlot(widgets, size.gw, size.gh), ...size });
+  const present = new Set(widgets.map((widget) => widget.id));
+  const seeded = new Set<string>(
+    Array.isArray(o.seeded) ? (o.seeded as unknown[]).filter((id): id is string => typeof id === "string") : [],
+  );
+  const size = { gw: 4, gh: 3 };
+
+  for (const id of SEEDED_TILES) {
+    if (present.has(id)) {
+      continue;
+    }
+    // A version-2 document that lacks Codex had it and lost it — the user
+    // removed it, so it is not the tile that is missing here.
+    if (id === "codex" && o.version !== 1) {
+      continue;
+    }
+    if (seeded.has(id)) {
+      continue;
+    }
+    widgets.push({ id, ...firstFreeSlot(widgets, size.gw, size.gh), ...size });
+    seeded.add(id);
   }
-  return { version: LAYOUT_VERSION, widgets };
+
+  for (const id of SEEDED_TILES) {
+    if (widgets.some((widget) => widget.id === id)) {
+      seeded.add(id);
+    }
+  }
+
+  return { version: LAYOUT_VERSION, widgets, seeded: [...seeded] };
 }

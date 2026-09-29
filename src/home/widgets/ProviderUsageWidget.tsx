@@ -151,17 +151,17 @@ export function ProviderUsageWidget({ provider }: Props) {
               <div
                 className="track"
                 role="progressbar"
-                aria-label={`${title} genutzt`}
+                aria-label={title}
                 aria-valuemin={0}
                 aria-valuemax={100}
                 aria-valuenow={percent ?? undefined}
-                aria-valuetext={`${displayPercent(percent)} genutzt`}
+                aria-valuetext={displayPercent(percent)}
               >
                 {percent !== null && (
                   <div className={fillClass} style={{ width: `${percent}%` }} />
                 )}
               </div>
-              <span className="val">{displayPercent(percent)} genutzt</span>
+              <span className="val">{displayPercent(percent)}</span>
             </div>
             <div className="quota-reset dim">
               {reset ? `Reset ${reset}` : "Resetzeit unbekannt"}
