@@ -1,4 +1,4 @@
-import { jsxs, jsx, Fragment } from "react/jsx-runtime";
+import { jsx, jsxs, Fragment } from "react/jsx-runtime";
 import { host } from "@hermes/plugin-sdk";
 import { useState, useEffect, useRef, useMemo, forwardRef, useImperativeHandle, useCallback } from "react";
 function getDashboardHost() {
@@ -30,6 +30,11 @@ function fetchJSON(url, init) {
 }
 function navigateTo(routePath) {
   getHost().navigateTo(routePath);
+}
+function onGatewayEvent(type, listener) {
+  const h = getHost();
+  if (!h.onEvent) return null;
+  return h.onEvent(type, listener);
 }
 const GRID_COLS = 12;
 function collide(a, b) {
@@ -293,6 +298,10 @@ function ClockWidget({ widgetProps, onWidgetPropsChange }) {
     /* @__PURE__ */ jsx("div", { className: "home-clock-sub", children: now.toLocaleDateString(void 0, { weekday: "long", day: "numeric", month: "long" }) })
   ] });
 }
+function matrixRows(height, rowH) {
+  const rows = Math.max(0, Math.floor(height / rowH));
+  return { rows, paintHeight: rows * rowH };
+}
 const GLYPHS = "アイウエオカキクケコサシスセソタチツテトナニヌネノ01☿";
 const COL_W = 13;
 const ROW_H = 14;
@@ -315,9 +324,12 @@ function MatrixWidget({ widgetProps, onWidgetPropsChange }) {
     let drops = [];
     let accent = "#d4af37";
     const fit = () => {
-      const r = cv.getBoundingClientRect();
-      cv.width = Math.max(10, r.width);
-      cv.height = Math.max(10, r.height);
+      const slot = cv.parentElement.getBoundingClientRect();
+      const avail = slot.height - cv.offsetTop - 6;
+      const { paintHeight } = matrixRows(avail, ROW_H);
+      cv.width = Math.max(10, Math.floor(slot.width));
+      cv.height = Math.max(ROW_H, paintHeight);
+      cv.style.height = `${cv.height}px`;
       accent = getComputedStyle(cv).getPropertyValue("--home-accent").trim() || accent;
       drops = Array.from(
         { length: Math.floor(cv.width / COL_W) },
@@ -326,7 +338,7 @@ function MatrixWidget({ widgetProps, onWidgetPropsChange }) {
     };
     fit();
     const ro = new ResizeObserver(fit);
-    ro.observe(cv);
+    ro.observe(cv.parentElement);
     const t = setInterval(() => {
       if (document.hidden) return;
       const step = speedRef.current;
@@ -428,7 +440,7 @@ function SessionsWidget({
     /* @__PURE__ */ jsx("span", { className: "bigval", children: status?.active_sessions ?? "—" }),
     /* @__PURE__ */ jsx("span", { className: "dim", children: " active" }),
     /* @__PURE__ */ jsx("div", { className: "rows", children: slice.map((s) => /* @__PURE__ */ jsxs("div", { className: "row", children: [
-      /* @__PURE__ */ jsx("span", { className: "dim", children: (s.title ?? s.source ?? s.id).slice(0, 18) }),
+      /* @__PURE__ */ jsx("span", { className: "dim row-name", title: s.title ?? s.source ?? s.id, children: s.title ?? s.source ?? s.id }),
       /* @__PURE__ */ jsx("span", { className: s.is_active ? "ok" : "dim", children: s.is_active ? "live" : "idle" })
     ] }, s.id)) })
   ] });
@@ -833,13 +845,13 @@ function CronWidget({ cron }) {
     ),
     /* @__PURE__ */ jsx("div", { className: "rows", children: slice.map((j) => /* @__PURE__ */ jsxs("div", { className: "row", children: [
       /* @__PURE__ */ jsx("span", { className: "dim", children: nextRunLabel(j) }),
-      /* @__PURE__ */ jsx("span", { children: (j.name ?? j.id).slice(0, 16) }),
+      /* @__PURE__ */ jsx("span", { className: "row-name", title: j.name ?? j.id, children: j.name ?? j.id }),
       /* @__PURE__ */ jsx("span", { className: j.last_error ? "werr" : "ok", children: j.last_error ? "err" : "ok" })
     ] }, j.id)) })
   ] });
 }
 const FILES = ["agent", "errors", "gateway"];
-const HEAD_RE = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}),\d+\s+(\w+)\S*\s*(.*)$/;
+const HEAD_RE = /^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}),\d+\s+(\w+)(?:\s*\[[^\]]*\])?\s*(.*)$/;
 const SHORT = {
   ERROR: "ERR",
   CRITICAL: "CRIT",
@@ -856,12 +868,13 @@ function levelClass(level) {
 }
 function parseRecords(lines) {
   const out = [];
-  for (const raw of lines) {
+  for (const line of lines) {
+    const raw = line.replace(/[\r\n]+$/, "");
     const m = HEAD_RE.exec(raw);
     if (m) {
       const rest = m[4];
       const ci = rest.indexOf(": ");
-      const hasComp = ci > 0 && ci < 40;
+      const hasComp = ci > 0 && ci < 60 && !/\s/.test(rest.slice(0, ci));
       out.push({
         level: m[3].toUpperCase(),
         time: m[2],
@@ -915,17 +928,19 @@ function ErrorsWidget({ logs, widgetProps, onWidgetPropsChange }) {
     ] });
   }
   const records = [...all].reverse();
-  return /* @__PURE__ */ jsxs("div", { children: [
+  return /* @__PURE__ */ jsxs("div", { className: "home-logs-wrap", children: [
     arrows,
     /* @__PURE__ */ jsxs("div", { className: "logs-sub", children: [
       /* @__PURE__ */ jsx("span", { className: "logs-file", children: fileKey.toUpperCase() }),
       /* @__PURE__ */ jsxs("span", { className: "dim", children: [
         records.length,
-        " rec"
+        " ",
+        records.length === 1 ? "record" : "records"
       ] })
     ] }),
     /* @__PURE__ */ jsx("div", { className: "home-logs", children: records.length === 0 ? /* @__PURE__ */ jsx("span", { className: "dim", children: "no records" }) : records.map((r, i) => /* @__PURE__ */ jsxs("div", { className: "log-row", title: r.text, children: [
       /* @__PURE__ */ jsx("span", { className: `log-lvl ${levelClass(r.level)}`, children: SHORT[r.level] ?? r.level.slice(0, 4) }),
+      r.time && /* @__PURE__ */ jsx("span", { className: "log-time", children: r.time }),
       /* @__PURE__ */ jsx("span", { className: "log-msg", children: r.message })
     ] }, `${r.time}-${i}`)) })
   ] });
@@ -1668,25 +1683,25 @@ function ProviderUsageWidget({ provider }) {
   const [failed, setFailed] = useState(false);
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
-    let active = true;
+    let active2 = true;
     const load = async () => {
       try {
         const result = await fetchJSON(
           `/api/plugins/home-dashboard/subscription-usage/${encodeURIComponent(provider)}`
         );
-        if (active) {
+        if (active2) {
           setUsage(result);
           setFailed(false);
         }
       } catch {
-        if (active) setFailed(true);
+        if (active2) setFailed(true);
       }
     };
     void load();
     const poll = setInterval(() => void load(), POLL_MS$1);
     const clock = setInterval(() => setNow(Date.now()), CLOCK_MS);
     return () => {
-      active = false;
+      active2 = false;
       clearInterval(poll);
       clearInterval(clock);
     };
@@ -1731,6 +1746,527 @@ function ProviderUsageWidget({ provider }) {
       "Stand ",
       new Date(usage.fetched_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
     ] })
+  ] });
+}
+let active = false;
+const listeners$1 = /* @__PURE__ */ new Set();
+function enterTheater() {
+  if (active) return;
+  active = true;
+  listeners$1.forEach((l) => l(true));
+}
+function exitTheater() {
+  if (!active) return;
+  active = false;
+  listeners$1.forEach((l) => l(false));
+}
+function subscribeTheater(listener) {
+  listeners$1.add(listener);
+  return () => listeners$1.delete(listener);
+}
+const EMPTY_LIVE = {
+  live: false,
+  busy: false,
+  currentTool: null,
+  toolHistory: [],
+  streamText: "",
+  lastMessage: null,
+  feed: [],
+  subagents: [],
+  activeSessionId: null,
+  activeTitle: null,
+  lastEventAt: null
+};
+const MAX_TOOL_HISTORY = 12;
+const MAX_FEED = 80;
+let liveState = EMPTY_LIVE;
+const listeners = /* @__PURE__ */ new Set();
+let subscribed = false;
+let feedSeq = 0;
+function setLive(fn) {
+  const next = fn(liveState);
+  if (next === liveState) return;
+  liveState = next;
+  listeners.forEach((l) => l());
+}
+function pushFeed(entry) {
+  setLive((s) => {
+    const e = { ...entry, id: ++feedSeq };
+    const feed = [e, ...s.feed];
+    return { ...s, feed: feed.length > MAX_FEED ? feed.slice(0, MAX_FEED) : feed };
+  });
+}
+function str(v) {
+  return typeof v === "string" && v.length > 0 ? v : void 0;
+}
+function asObj(v) {
+  return typeof v === "object" && v !== null ? v : void 0;
+}
+function pick(p, ...keys) {
+  if (!p) return void 0;
+  for (const k of keys) {
+    const v = str(p[k]);
+    if (v) return v;
+  }
+  return void 0;
+}
+function argPreview(args, max = 160) {
+  if (args === void 0 || args === null) return void 0;
+  let s;
+  if (typeof args === "string") s = args;
+  else {
+    try {
+      s = JSON.stringify(args);
+    } catch {
+      s = String(args);
+    }
+  }
+  if (s.length <= max) return s;
+  return `${s.slice(0, max)}…`;
+}
+function handleEvent(event) {
+  const { type, payload } = event;
+  const p = asObj(payload);
+  const now = Date.now();
+  const bump = (s) => ({ ...s, lastEventAt: now });
+  if (type === "tool.generating") {
+    const name = pick(p, "name") ?? "tool";
+    setLive((s) => bump({
+      ...s,
+      busy: true,
+      currentTool: { name, startedAt: now, status: "running" }
+    }));
+    pushFeed({ at: now, kind: "tool", label: name, detail: "generating…" });
+    return;
+  }
+  if (type === "tool.start" || type === "tool.progress") {
+    const name = pick(p, "name", "tool_name") ?? "tool";
+    setLive((s) => bump({
+      ...s,
+      busy: true,
+      currentTool: { name, args: p?.args ?? p, startedAt: now, status: "running" }
+    }));
+    pushFeed({
+      at: now,
+      kind: "tool",
+      label: name,
+      detail: type === "tool.progress" ? "progress…" : argPreview(p?.args)
+    });
+    return;
+  }
+  if (type === "tool.complete") {
+    const name = pick(p, "name", "tool_name") ?? "";
+    const ok = p?.ok !== false && !str(p?.error);
+    const duration = typeof p?.duration === "number" ? p.duration : void 0;
+    setLive((s) => bump({
+      ...s,
+      currentTool: null,
+      busy: s.subagents.some((a) => a.status === "running") || s.streamText.length > 0,
+      toolHistory: [{
+        name: name || s.currentTool?.name || "tool",
+        args: p?.args ?? s.currentTool?.args,
+        startedAt: s.currentTool?.startedAt ?? now,
+        status: ok ? "complete" : "failed",
+        duration
+      }, ...s.toolHistory].slice(0, MAX_TOOL_HISTORY)
+    }));
+    pushFeed({
+      at: now,
+      kind: "tool",
+      label: name || "tool",
+      ok,
+      detail: duration !== void 0 ? `${duration.toFixed(1)}s` : void 0
+    });
+    return;
+  }
+  if (type === "message.start") {
+    setLive((s) => bump({ ...s, busy: true, streamText: "" }));
+    return;
+  }
+  if (type === "message.delta") {
+    const text = pick(p, "text", "delta", "content");
+    if (!text) return;
+    setLive((s) => bump({
+      ...s,
+      busy: true,
+      streamText: (s.streamText + text).slice(-6e3)
+    }));
+    return;
+  }
+  if (type === "message.interim") {
+    const text = pick(p, "text", "content");
+    if (!text) return;
+    setLive((s) => bump({ ...s, lastMessage: text }));
+    return;
+  }
+  if (type === "message.complete") {
+    setLive((s) => {
+      const done = s.streamText.trim();
+      return bump({
+        ...s,
+        streamText: "",
+        lastMessage: done.length > 0 ? done : s.lastMessage,
+        busy: s.currentTool !== null || s.subagents.some((a) => a.status === "running")
+      });
+    });
+    return;
+  }
+  if (type === "subagent.start" || type === "subagent.progress") {
+    const name = pick(p, "name", "role", "id") ?? "subagent";
+    setLive((s) => bump({
+      ...s,
+      busy: true,
+      subagents: [
+        { name, status: "running", goal: pick(p, "goal", "task") },
+        ...s.subagents.filter((a) => a.name !== name)
+      ].slice(0, 6)
+    }));
+    pushFeed({ at: now, kind: "subagent", label: name, detail: "spawned" });
+    return;
+  }
+  if (type === "subagent.complete") {
+    const name = pick(p, "name", "role", "id");
+    if (!name) return;
+    setLive((s) => bump({
+      ...s,
+      subagents: s.subagents.map((a) => a.name === name ? { ...a, status: "done" } : a)
+    }));
+    pushFeed({ at: now, kind: "subagent", label: name, ok: true, detail: "done" });
+    return;
+  }
+  if (type === "subagent.thinking") {
+    const name = pick(p, "name", "role", "id") ?? "subagent";
+    pushFeed({ at: now, kind: "subagent", label: name, detail: "thinking…" });
+    setLive(bump);
+    return;
+  }
+  if (type === "session.new" || type === "session.info") {
+    const sid = pick(p, "session_id", "id") ?? event.session_id;
+    if (!sid) return;
+    setLive((s) => bump({
+      ...s,
+      activeSessionId: sid,
+      activeTitle: pick(p, "title") ?? s.activeTitle
+    }));
+    pushFeed({ at: now, kind: "session", label: "session", detail: "new" });
+    return;
+  }
+  if (type === "session.title") {
+    const title = pick(p, "title");
+    if (!title) return;
+    setLive((s) => bump({ ...s, activeTitle: title }));
+    return;
+  }
+  if (type === "session.status") {
+    const sid = pick(p, "session_id", "id") ?? event.session_id;
+    const status = pick(p, "status");
+    if (status === "stopped" || status === "idle") {
+      setLive((s) => s.busy ? bump({ ...s, busy: false }) : s);
+    }
+    if (sid) setLive((s) => bump({ ...s, activeSessionId: sid }));
+    return;
+  }
+  if (type === "error") {
+    pushFeed({
+      at: now,
+      kind: "system",
+      label: "error",
+      detail: pick(p, "error", "message")
+    });
+    setLive(bump);
+    return;
+  }
+  if (type.startsWith("tool.") || type.startsWith("message.") || type.startsWith("subagent.") || type.startsWith("session.") || type.startsWith("thinking.") || type.startsWith("reasoning.") || type.startsWith("approval.") || type.startsWith("run.")) {
+    pushFeed({ at: now, kind: "system", label: type });
+    setLive(bump);
+  }
+}
+function ensureSubscribed() {
+  if (subscribed) return;
+  subscribed = true;
+  const all = onGatewayEvent("*", handleEvent);
+  if (all) {
+    setLive((s) => s.live ? s : { ...s, live: true });
+    pushFeed({ at: Date.now(), kind: "system", label: "live", detail: "gateway channel open" });
+  }
+}
+function useAgentLive() {
+  const [state, setState] = useState(liveState);
+  useEffect(() => {
+    ensureSubscribed();
+    setState(liveState);
+    listeners.add(onChange);
+    return () => {
+      listeners.delete(onChange);
+    };
+  }, []);
+  function onChange() {
+    setState(liveState);
+  }
+  return state;
+}
+function renderInline(text, keyBase) {
+  const nodes = [];
+  const re = /(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/g;
+  let last = 0;
+  let i = 0;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) nodes.push(text.slice(last, m.index));
+    const tok = m[0];
+    if (tok.startsWith("**")) {
+      nodes.push(/* @__PURE__ */ jsx("strong", { children: tok.slice(2, -2) }, `${keyBase}-b${i}`));
+    } else if (tok.startsWith("`")) {
+      nodes.push(/* @__PURE__ */ jsx("code", { children: tok.slice(1, -1) }, `${keyBase}-c${i}`));
+    } else {
+      nodes.push(/* @__PURE__ */ jsx("em", { children: tok.slice(1, -1) }, `${keyBase}-i${i}`));
+    }
+    last = m.index + tok.length;
+    i += 1;
+  }
+  if (last < text.length) nodes.push(text.slice(last));
+  return nodes;
+}
+function MarkdownText({ text }) {
+  const lines = text.split("\n");
+  const out = [];
+  const codeBuf = [];
+  let inCode = false;
+  const listItems = [];
+  const flushList = (key) => {
+    if (listItems.length === 0) return;
+    out.push(
+      /* @__PURE__ */ jsx("div", { className: "home-md-list", children: listItems }, key)
+    );
+    listItems.length = 0;
+  };
+  lines.forEach((line, idx) => {
+    const key = `l${idx}`;
+    if (line.trimStart().startsWith("```")) {
+      if (inCode) {
+        out.push(
+          /* @__PURE__ */ jsx("pre", { className: "home-md-pre", children: /* @__PURE__ */ jsx("code", { children: codeBuf.join("\n") }) }, key)
+        );
+        codeBuf.length = 0;
+        inCode = false;
+      } else {
+        flushList(key);
+        inCode = true;
+      }
+      return;
+    }
+    if (inCode) {
+      codeBuf.push(line);
+      return;
+    }
+    const t = line.trim();
+    if (!t) {
+      flushList(key);
+      out.push(/* @__PURE__ */ jsx("div", { className: "home-md-gap" }, key));
+      return;
+    }
+    const heading = t.match(/^(#{1,3})\s+(.*)$/);
+    if (heading) {
+      flushList(key);
+      out.push(
+        /* @__PURE__ */ jsx("div", { className: `home-md-h h${heading[1].length}`, children: renderInline(heading[2], key) }, key)
+      );
+      return;
+    }
+    const item = t.match(/^[-*]\s+(.*)$/);
+    if (item) {
+      listItems.push(/* @__PURE__ */ jsx("div", { className: "home-md-li", children: renderInline(item[1], key) }, key));
+      return;
+    }
+    flushList(key);
+    out.push(/* @__PURE__ */ jsx("div", { className: "home-md-p", children: renderInline(t, key) }, key));
+  });
+  if (inCode) {
+    out.push(
+      /* @__PURE__ */ jsx("pre", { className: "home-md-pre", children: /* @__PURE__ */ jsx("code", { children: codeBuf.join("\n") }) }, "open-fence")
+    );
+  }
+  flushList("list-end");
+  return /* @__PURE__ */ jsx(Fragment, { children: out });
+}
+function useScene(live) {
+  const [scene, setScene] = useState(() => sceneFrom(live));
+  const wasStreaming = useRef(false);
+  useEffect(() => {
+    const streaming = live.streamText.trim().length > 0;
+    const prevStreaming = wasStreaming.current;
+    wasStreaming.current = streaming;
+    if (live.currentTool) {
+      const key = `tool-${live.currentTool.name}-${live.currentTool.startedAt}`;
+      const body = argPreview(live.currentTool.args, 800) ?? "";
+      setScene(
+        (s) => s.key === key ? { ...s, body } : {
+          key,
+          kind: "tool",
+          title: live.currentTool.name,
+          body,
+          meta: "running"
+        }
+      );
+      return;
+    }
+    if (streaming && !prevStreaming) {
+      setScene({
+        key: `msg-${Date.now()}`,
+        kind: "message",
+        title: "message",
+        body: live.streamText,
+        meta: "streaming",
+        streaming: true
+      });
+    } else if (streaming) {
+      setScene((s) => s.streaming ? { ...s, body: live.streamText } : s);
+    } else if (live.lastMessage) {
+      const msg = live.lastMessage;
+      setScene(
+        (s) => s.kind === "message" && !s.streaming && s.body === msg ? s : { key: `done-${Date.now()}`, kind: "message", title: "message", body: msg, meta: "complete" }
+      );
+    } else {
+      setScene(
+        (s) => s.kind === "idle" ? s : { key: "idle", kind: "idle", title: "idle", body: "the agent is resting — new activity will appear here" }
+      );
+    }
+  }, [live.streamText, live.currentTool, live.lastMessage]);
+  return scene;
+}
+function sceneFrom(live) {
+  if (live.streamText.trim()) {
+    return {
+      key: `msg-${Date.now()}`,
+      kind: "message",
+      title: "message",
+      body: live.streamText,
+      meta: "streaming",
+      streaming: true
+    };
+  }
+  if (live.currentTool) {
+    return {
+      key: `tool-${live.currentTool.name}-${live.currentTool.startedAt}`,
+      kind: "tool",
+      title: live.currentTool.name,
+      body: argPreview(live.currentTool.args, 500) ?? "",
+      meta: "running"
+    };
+  }
+  if (live.lastMessage) {
+    return { key: "done", kind: "message", title: "message", body: live.lastMessage, meta: "complete" };
+  }
+  return { key: "idle", kind: "idle", title: "idle", body: "the agent is resting — new activity will appear here" };
+}
+function SceneBody({ scene }) {
+  if (scene.kind === "tool") {
+    return /* @__PURE__ */ jsxs("div", { className: "home-scene-tool", children: [
+      /* @__PURE__ */ jsx("span", { className: "home-scene-title", children: scene.title }),
+      /* @__PURE__ */ jsx("span", { className: "home-scene-meta", children: scene.meta }),
+      scene.body && /* @__PURE__ */ jsx("pre", { className: "home-scene-args", children: scene.body })
+    ] });
+  }
+  if (scene.kind === "message") {
+    return /* @__PURE__ */ jsxs("div", { className: "home-scene-msg", children: [
+      /* @__PURE__ */ jsx(MarkdownText, { text: scene.body }),
+      scene.streaming && /* @__PURE__ */ jsx("span", { className: "home-scene-caret", "aria-hidden": "true" })
+    ] });
+  }
+  return /* @__PURE__ */ jsx("div", { className: "home-scene-idle", children: scene.body });
+}
+function LiveScene({ scene }) {
+  const [current, setCurrent] = useState(scene);
+  const [leaving, setLeaving] = useState(null);
+  const timer = useRef(null);
+  useEffect(() => {
+    if (scene.key === current.key) return;
+    setLeaving(current);
+    setCurrent(scene);
+    if (timer.current) window.clearTimeout(timer.current);
+    timer.current = window.setTimeout(() => setLeaving(null), 460);
+  }, [scene.key]);
+  useEffect(() => () => {
+    if (timer.current) window.clearTimeout(timer.current);
+  }, []);
+  return /* @__PURE__ */ jsxs("div", { className: "home-scene", children: [
+    leaving && /* @__PURE__ */ jsx("div", { className: "home-scene-item leaving", "aria-hidden": "true", children: /* @__PURE__ */ jsx(SceneBody, { scene: leaving }) }),
+    /* @__PURE__ */ jsx("div", { className: "home-scene-item", children: /* @__PURE__ */ jsx(SceneBody, { scene: current }) }, current.key)
+  ] });
+}
+function fmtCost$1(n) {
+  if (n === void 0 || !Number.isFinite(n)) return "—";
+  if (n < 0.01) return `$${(n * 1e3).toFixed(2)}m`;
+  if (n < 1) return `$${n.toFixed(3)}`;
+  return `$${n.toFixed(2)}`;
+}
+function fmtTok$1(n) {
+  if (n === void 0 || !Number.isFinite(n)) return "—";
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}k`;
+  return String(n);
+}
+function AgentWidget({ data }) {
+  const live = useAgentLive();
+  const scene = useScene(live);
+  const totals = data.analytics?.totals;
+  const statusLabel = live.busy ? live.currentTool ? "working" : "thinking" : "idle";
+  return /* @__PURE__ */ jsxs("div", { className: "home-agent", children: [
+    /* @__PURE__ */ jsxs("div", { className: "home-agent-head", children: [
+      /* @__PURE__ */ jsx("span", { className: `home-agent-dot ${live.busy ? "busy" : ""}`, "aria-hidden": "true" }),
+      /* @__PURE__ */ jsx("span", { className: "home-agent-status", children: statusLabel })
+    ] }),
+    /* @__PURE__ */ jsx("div", { className: "home-agent-scene", children: /* @__PURE__ */ jsx(LiveScene, { scene }) }),
+    /* @__PURE__ */ jsx(HoverCtl, { className: "home-agent-ctl", children: /* @__PURE__ */ jsxs(
+      "button",
+      {
+        className: "home-agent-take",
+        onClick: () => enterTheater(),
+        title: "Take control of the screen — live agent theater",
+        "aria-label": "Take control",
+        children: [
+          /* @__PURE__ */ jsx("span", { className: "home-agent-take-ico", "aria-hidden": "true" }),
+          "take control"
+        ]
+      }
+    ) }),
+    /* @__PURE__ */ jsxs("div", { className: "home-agent-stats", children: [
+      /* @__PURE__ */ jsxs("span", { title: "Input tokens today", children: [
+        /* @__PURE__ */ jsx("i", { children: "in" }),
+        " ",
+        fmtTok$1(totals?.total_input)
+      ] }),
+      /* @__PURE__ */ jsxs("span", { title: "Output tokens today", children: [
+        /* @__PURE__ */ jsx("i", { children: "out" }),
+        " ",
+        fmtTok$1(totals?.total_output)
+      ] }),
+      /* @__PURE__ */ jsxs("span", { title: "Estimated cost today", children: [
+        /* @__PURE__ */ jsx("i", { children: "est" }),
+        " ",
+        fmtCost$1(totals?.total_estimated_cost)
+      ] }),
+      /* @__PURE__ */ jsxs("span", { title: "Sessions today", children: [
+        /* @__PURE__ */ jsx("i", { children: "ses" }),
+        " ",
+        totals?.total_sessions ?? "—"
+      ] })
+    ] }),
+    live.toolHistory.length > 0 && /* @__PURE__ */ jsx("div", { className: "home-agent-history", children: live.toolHistory.slice(0, 4).map((t, i) => /* @__PURE__ */ jsxs("span", { className: "home-agent-hist", children: [
+      /* @__PURE__ */ jsx(
+        "span",
+        {
+          className: `home-agent-hist-dot ${t.status === "complete" ? "ok" : "bad"}`,
+          "aria-hidden": "true"
+        }
+      ),
+      t.name,
+      t.duration !== void 0 && /* @__PURE__ */ jsxs("i", { children: [
+        t.duration.toFixed(0),
+        "s"
+      ] })
+    ] }, `${t.name}-${t.startedAt}-${i}`)) }),
+    !live.live && /* @__PURE__ */ jsx("div", { className: "home-agent-dim", children: "polling mode · no live channel" })
   ] });
 }
 function providerUsageWidget(title, provider) {
@@ -1907,7 +2443,19 @@ const WIDGET_REGISTRY = {
     navigateTo: null,
     dataSource: null
   },
-  codex: providerUsageWidget("codex", "openai-codex")
+  codex: providerUsageWidget("codex", "openai-codex"),
+  agent: {
+    title: "agent",
+    component: ({ data }) => /* @__PURE__ */ jsx(AgentWidget, { data }),
+    defaultSize: { gw: 4, gh: 3 },
+    minSize: { gw: 3, gh: 2 },
+    navigateTo: null,
+    dataSource: null
+  }
+};
+const STATE_COPY = {
+  offline: "offline · Hermes backend unreachable",
+  unavailable: "unavailable · this source is not responding"
 };
 function WidgetShell({
   title,
@@ -1916,7 +2464,7 @@ function WidgetShell({
   dragging,
   swapTarget,
   trashing,
-  error,
+  state = "ok",
   onRemove,
   onHeaderPointerDown,
   onResizePointerDown,
@@ -1937,13 +2485,24 @@ function WidgetShell({
       onClick: !editing && onClickThrough ? onClickThrough : void 0,
       role: !editing && onClickThrough ? "link" : void 0,
       children: [
-        /* @__PURE__ */ jsx("b", { className: "hd", onPointerDown: editing ? onHeaderPointerDown : void 0, children: title }),
-        error ? /* @__PURE__ */ jsx("span", { className: "werr", children: "● no data" }) : children,
+        /* @__PURE__ */ jsxs("b", { className: "hd", onPointerDown: editing ? onHeaderPointerDown : void 0, children: [
+          title,
+          state === "stale" && /* @__PURE__ */ jsx("span", { className: "hd-stale", title: "Last update failed — showing previous data", children: " · stale" })
+        ] }),
+        STATE_COPY[state] ? /* @__PURE__ */ jsx("span", { className: `wstate wstate-${state}`, children: STATE_COPY[state] }) : children,
         editing && onRemove && /* @__PURE__ */ jsx("button", { className: "wremove", onClick: onRemove, "aria-label": `Remove ${title}`, children: "×" }),
         editing && /* @__PURE__ */ jsx("div", { className: "rs", onPointerDown: onResizePointerDown })
       ]
     }
   );
+}
+function widgetState(source, data) {
+  if (source === null) return "ok";
+  const failing = data.errors.has(source);
+  const has = data[source] != null;
+  if (!failing) return has ? "ok" : "loading";
+  if (has) return "stale";
+  return data.errors.has("status") && data.status == null ? "offline" : "unavailable";
 }
 const CELL_H = 44;
 const GAP = 10;
@@ -2194,7 +2753,7 @@ const GridCanvas = forwardRef(function GridCanvas2({ layout, editing, data, onLa
           dragging: isDragged,
           swapTarget: isTwinTarget,
           trashing: isDragged && drag?.overTrash,
-          error: def.dataSource !== null && data.errors.has(def.dataSource),
+          state: widgetState(def.dataSource, data),
           onRemove: () => onRemove(item.id),
           onHeaderPointerDown: (e) => startDrag(item, "move", e),
           onResizePointerDown: (e) => startDrag(item, "resize", e),
@@ -2300,6 +2859,385 @@ function useHomeData() {
   }, []);
   return data;
 }
+function buildRecommendations(data, live) {
+  const out = [];
+  const totals = data.analytics?.totals;
+  if (data.errors.size > 0) {
+    out.push({
+      severity: "crit",
+      title: `${data.errors.size} data source(s) failing`,
+      detail: `Polling errors on: ${[...data.errors].join(", ")}. Check the gateway and plugin API.`
+    });
+  }
+  const errorLogs = data.logs?.lines?.length ?? 0;
+  if (errorLogs > 0) {
+    out.push({
+      severity: errorLogs > 10 ? "crit" : "warn",
+      title: `${errorLogs} error line(s) in the gateway log`,
+      detail: "Tail the log to see if a platform or plugin is throwing repeatedly."
+    });
+  }
+  const est = totals?.total_estimated_cost ?? 0;
+  if (est > 0.5) {
+    out.push({
+      severity: est > 2 ? "crit" : "warn",
+      title: `≈$${est.toFixed(2)} estimated today`,
+      detail: est > 2 ? "Cost is climbing. Consider a cheaper model, context compression, or capping long sessions." : "Spend is moderate — keep an eye on it if you're mid-migration."
+    });
+  }
+  const totalTok = (totals?.total_input ?? 0) + (totals?.total_output ?? 0);
+  if (totalTok > 2e6) {
+    out.push({
+      severity: "warn",
+      title: `${(totalTok / 1e6).toFixed(1)}M tokens today`,
+      detail: "Heavy usage. /compact long sessions and reuse cached context to cut input tokens."
+    });
+  }
+  const repeated = mostRepeatedTool(live.toolHistory);
+  if (repeated && repeated.count >= 5) {
+    out.push({
+      severity: "info",
+      title: `"${repeated.name}" called ${repeated.count}× recently`,
+      detail: "A repeated tool sequence is a skill in disguise — consider saving it with skill_manage."
+    });
+  }
+  const activeSessions = (data.sessions?.sessions ?? []).filter((s) => s.is_active).length;
+  if (activeSessions >= 3) {
+    out.push({
+      severity: "info",
+      title: `${activeSessions} sessions active at once`,
+      detail: "Parallel work is running — delegate_task fans out well, but watch for tool conflicts on shared files."
+    });
+  }
+  if (live.subagents.some((a) => a.status === "running")) {
+    out.push({
+      severity: "info",
+      title: `${live.subagents.filter((a) => a.status === "running").length} subagent(s) working`,
+      detail: "Orchestration in flight. Check back for their consolidated reports."
+    });
+  }
+  const slow = live.currentTool && Date.now() - live.currentTool.startedAt > 12e4 ? live.currentTool : null;
+  if (slow) {
+    out.push({
+      severity: "warn",
+      title: `"${slow.name}" running >2min`,
+      detail: "Long tool call — it may be a build, a big search, or a hung process. Watch it."
+    });
+  }
+  const active2 = (data.sessions?.sessions ?? []).find((s) => s.is_active);
+  if (active2) {
+    if ((active2.message_count ?? 0) > 80) {
+      out.push({
+        severity: "warn",
+        title: `Active session at ${active2.message_count} messages`,
+        detail: "Long context costs more per turn and degrades focus. A fresh session or /compact resets the cache."
+      });
+    }
+    if ((active2.tool_call_count ?? 0) > 40) {
+      out.push({
+        severity: "info",
+        title: `${active2.tool_call_count} tool calls in the active session`,
+        detail: "High tool churn — the task may benefit from a dedicated skill or a subagent."
+      });
+    }
+  }
+  const topSkill = data.analytics?.skills?.top_skills?.[0];
+  if (topSkill && topSkill.total_count > 0 && topSkill.percentage < 5) {
+    out.push({
+      severity: "info",
+      title: `Top skill "${topSkill.skill}" only ${topSkill.percentage}% of loads`,
+      detail: "Your most-used skill is still under-leveraged — consider bundling related skills."
+    });
+  }
+  if (out.length === 0) {
+    out.push({
+      severity: "info",
+      title: "All quiet on the home front",
+      detail: "No anomalies right now. The coach stays silent until there's something worth saying."
+    });
+  }
+  return out;
+}
+function mostRepeatedTool(history) {
+  const counts = /* @__PURE__ */ new Map();
+  for (const t of history) {
+    counts.set(t.name, (counts.get(t.name) ?? 0) + 1);
+  }
+  let best = null;
+  for (const [name, count] of counts) {
+    if (!best || count > best.count) best = { name, count };
+  }
+  return best && best.count >= 2 ? best : null;
+}
+function fmtCost(n) {
+  if (n === void 0 || !Number.isFinite(n)) return "—";
+  if (n < 0.01) return `$${(n * 1e3).toFixed(2)}m`;
+  if (n < 1) return `$${n.toFixed(3)}`;
+  return `$${n.toFixed(2)}`;
+}
+function fmtTok(n) {
+  if (n === void 0 || !Number.isFinite(n)) return "—";
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}k`;
+  return String(n);
+}
+function timeAgo(at) {
+  const s = Math.max(0, Math.round((Date.now() - at) / 1e3));
+  if (s < 5) return "now";
+  if (s < 60) return `${s}s ago`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m ago`;
+  return `${Math.round(m / 60)}h ago`;
+}
+function hhmm(at) {
+  const d = new Date(at);
+  return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
+}
+function extractPaths(tools) {
+  const paths = /* @__PURE__ */ new Set();
+  for (const t of tools) {
+    const args = t.args;
+    if (!args || typeof args !== "object") continue;
+    const a = args;
+    for (const key of ["path", "file", "output_path", "workdir", "cwd", "target"]) {
+      const v = a[key];
+      if (typeof v === "string" && v.length > 1) paths.add(v);
+    }
+    if (typeof a.command === "string") {
+      const m = a.command.match(/["']([^"']+\.[a-zA-Z0-9_]+)["']/g);
+      if (m) m.forEach((s) => paths.add(s.slice(1, -1)));
+    }
+  }
+  return [...paths].slice(0, 8);
+}
+function fileGlyph(path) {
+  const ext = path.split(".").pop()?.toLowerCase() ?? "";
+  if (ext === "ts" || ext === "tsx") return "τ";
+  if (ext === "js" || ext === "jsx" || ext === "mjs") return "JS";
+  if (ext === "py") return "py";
+  if (ext === "md") return "MD";
+  if (ext === "json") return "{}";
+  if (ext === "yaml" || ext === "yml") return "Y";
+  if (ext === "css" || ext === "html") return "#";
+  if (["png", "jpg", "webp", "gif", "svg"].includes(ext)) return "▣";
+  return "·";
+}
+function PanelTitle({ children }) {
+  return /* @__PURE__ */ jsx("b", { className: "home-theater-panel-title", children });
+}
+function NowPanel({ data, live }) {
+  const scene = useScene(live);
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1e3);
+    return () => clearInterval(t);
+  }, []);
+  const status = live.busy ? live.currentTool ? "working" : "thinking" : data.status?.gateway_running ? "idle" : "gateway down";
+  return /* @__PURE__ */ jsxs("section", { className: "home-theater-panel home-theater-now", children: [
+    /* @__PURE__ */ jsxs(PanelTitle, { children: [
+      /* @__PURE__ */ jsx("span", { className: `home-agent-dot ${live.busy ? "busy" : ""}`, "aria-hidden": "true" }),
+      "NOW · ",
+      status.toUpperCase(),
+      live.activeTitle && /* @__PURE__ */ jsxs("span", { className: "home-theater-sub", children: [
+        "— ",
+        live.activeTitle
+      ] })
+    ] }),
+    /* @__PURE__ */ jsx("div", { className: "home-theater-scene", children: /* @__PURE__ */ jsx(LiveScene, { scene }) }),
+    /* @__PURE__ */ jsxs("div", { className: "home-theater-feed", children: [
+      live.feed.length === 0 && /* @__PURE__ */ jsx("div", { className: "home-theater-dim", children: "no live activity yet — the feed fills as the agent works" }),
+      live.feed.slice(0, 40).map((e) => /* @__PURE__ */ jsxs("div", { className: "home-theater-feed-row", children: [
+        /* @__PURE__ */ jsx("span", { className: "home-theater-feed-time", children: hhmm(e.at) }),
+        /* @__PURE__ */ jsx(
+          "span",
+          {
+            className: `home-theater-feed-kind ${e.kind}${e.ok === false ? " bad" : ""}`,
+            "aria-hidden": "true"
+          }
+        ),
+        /* @__PURE__ */ jsx("span", { className: "home-theater-feed-label", children: e.label }),
+        e.detail && /* @__PURE__ */ jsx("span", { className: "home-theater-feed-detail", children: e.detail })
+      ] }, e.id))
+    ] }),
+    /* @__PURE__ */ jsxs("div", { className: "home-theater-foot", children: [
+      /* @__PURE__ */ jsxs("span", { children: [
+        "last event ",
+        live.lastEventAt ? timeAgo(live.lastEventAt) : "—"
+      ] }),
+      /* @__PURE__ */ jsx("span", { children: live.live ? "live" : "polling" }),
+      /* @__PURE__ */ jsxs("span", { children: [
+        "updated ",
+        timeAgo(now)
+      ] })
+    ] })
+  ] });
+}
+function ToolPanel({ live }) {
+  return /* @__PURE__ */ jsxs("section", { className: "home-theater-panel", children: [
+    /* @__PURE__ */ jsx(PanelTitle, { children: "FUNCTION" }),
+    live.currentTool ? /* @__PURE__ */ jsxs("div", { className: "home-theater-fn-current", children: [
+      /* @__PURE__ */ jsxs("div", { className: "home-theater-fn-name", children: [
+        /* @__PURE__ */ jsx("span", { className: "home-theater-fn-dot running", "aria-hidden": "true" }),
+        live.currentTool.name,
+        /* @__PURE__ */ jsx("span", { className: "home-theater-fn-state running", children: "running" })
+      ] }),
+      /* @__PURE__ */ jsx("pre", { className: "home-theater-fn-args", children: argPreview(live.currentTool.args, 600) ?? "awaiting args…" })
+    ] }) : /* @__PURE__ */ jsx("div", { className: "home-theater-dim", children: "no tool running" }),
+    live.toolHistory.length > 0 && /* @__PURE__ */ jsx("div", { className: "home-theater-fn-history", children: live.toolHistory.slice(0, 8).map((t, i) => /* @__PURE__ */ jsxs("div", { className: "home-theater-fn-row", children: [
+      /* @__PURE__ */ jsx(
+        "span",
+        {
+          className: `home-theater-fn-dot ${t.status === "complete" ? "ok" : "bad"}`,
+          "aria-hidden": "true"
+        }
+      ),
+      /* @__PURE__ */ jsx("span", { className: "home-theater-fn-hname", children: t.name }),
+      /* @__PURE__ */ jsx("span", { className: "home-theater-fn-hargs", children: argPreview(t.args, 90) }),
+      t.duration !== void 0 && /* @__PURE__ */ jsxs("span", { className: "home-theater-fn-hdur", children: [
+        t.duration.toFixed(1),
+        "s"
+      ] })
+    ] }, `${t.name}-${t.startedAt}-${i}`)) })
+  ] });
+}
+function TokenPanel({ data }) {
+  const totals = data.analytics?.totals;
+  const byModel = data.analytics?.by_model ?? [];
+  const active2 = (data.sessions?.sessions ?? []).find((s) => s.is_active);
+  return /* @__PURE__ */ jsxs("section", { className: "home-theater-panel", children: [
+    /* @__PURE__ */ jsx(PanelTitle, { children: "TOKENS & COST" }),
+    /* @__PURE__ */ jsxs("div", { className: "home-theater-tok-grid", children: [
+      /* @__PURE__ */ jsxs("div", { className: "home-theater-tok-cell", children: [
+        /* @__PURE__ */ jsx("span", { className: "home-theater-tok-num", children: fmtTok(totals?.total_input) }),
+        /* @__PURE__ */ jsx("span", { className: "home-theater-tok-lbl", children: "input today" })
+      ] }),
+      /* @__PURE__ */ jsxs("div", { className: "home-theater-tok-cell", children: [
+        /* @__PURE__ */ jsx("span", { className: "home-theater-tok-num", children: fmtTok(totals?.total_output) }),
+        /* @__PURE__ */ jsx("span", { className: "home-theater-tok-lbl", children: "output today" })
+      ] }),
+      /* @__PURE__ */ jsxs("div", { className: "home-theater-tok-cell", children: [
+        /* @__PURE__ */ jsx("span", { className: "home-theater-tok-num", children: fmtTok(totals?.total_cache_read) }),
+        /* @__PURE__ */ jsx("span", { className: "home-theater-tok-lbl", children: "cache read" })
+      ] }),
+      /* @__PURE__ */ jsxs("div", { className: "home-theater-tok-cell", children: [
+        /* @__PURE__ */ jsx("span", { className: "home-theater-tok-num home-theater-money", children: fmtCost(totals?.total_estimated_cost) }),
+        /* @__PURE__ */ jsx("span", { className: "home-theater-tok-lbl", children: "est. cost today" })
+      ] })
+    ] }),
+    byModel.length > 0 && /* @__PURE__ */ jsx("div", { className: "home-theater-tok-models", children: byModel.slice(0, 4).map((m) => /* @__PURE__ */ jsxs("div", { className: "home-theater-tok-model", children: [
+      /* @__PURE__ */ jsx("span", { className: "home-theater-tok-mname", children: m.model }),
+      /* @__PURE__ */ jsxs("span", { className: "home-theater-tok-mtok", children: [
+        fmtTok(m.input_tokens + m.output_tokens),
+        " tok"
+      ] }),
+      /* @__PURE__ */ jsx("span", { className: "home-theater-tok-mcost", children: fmtCost(m.estimated_cost) })
+    ] }, m.model)) }),
+    active2 && /* @__PURE__ */ jsxs("div", { className: "home-theater-tok-session", children: [
+      /* @__PURE__ */ jsx("span", { className: "home-theater-tok-slbl", children: "active session" }),
+      /* @__PURE__ */ jsx("span", { className: "home-theater-tok-stitle", children: active2.title ?? active2.id }),
+      /* @__PURE__ */ jsxs("span", { className: "home-theater-tok-snum", children: [
+        fmtTok((active2.input_tokens ?? 0) + (active2.output_tokens ?? 0)),
+        " tok ·",
+        " ",
+        active2.message_count ?? 0,
+        " msg · ",
+        active2.tool_call_count ?? 0,
+        " tools"
+      ] })
+    ] })
+  ] });
+}
+function ProjectPanel({ data, live }) {
+  const active2 = (data.sessions?.sessions ?? []).find((s) => s.is_active);
+  const paths = useMemo(
+    () => extractPaths([...live.currentTool ? [live.currentTool] : [], ...live.toolHistory]),
+    [live.currentTool, live.toolHistory]
+  );
+  return /* @__PURE__ */ jsxs("section", { className: "home-theater-panel", children: [
+    /* @__PURE__ */ jsx(PanelTitle, { children: "PROJECT" }),
+    active2 ? /* @__PURE__ */ jsxs("div", { className: "home-theater-proj-session", children: [
+      /* @__PURE__ */ jsx("div", { className: "home-theater-proj-title", children: active2.title ?? "(untitled session)" }),
+      /* @__PURE__ */ jsxs("div", { className: "home-theater-proj-meta", children: [
+        active2.model ?? "—",
+        " · ",
+        active2.source ?? "—",
+        " · started ",
+        timeAgo(active2.started_at * 1e3)
+      ] })
+    ] }) : /* @__PURE__ */ jsx("div", { className: "home-theater-dim", children: "no active session" }),
+    paths.length > 0 ? /* @__PURE__ */ jsx("div", { className: "home-theater-proj-files", children: paths.map((p) => /* @__PURE__ */ jsxs("div", { className: "home-theater-proj-file", children: [
+      /* @__PURE__ */ jsx("span", { className: "home-theater-proj-glyph", children: fileGlyph(p) }),
+      /* @__PURE__ */ jsx("span", { className: "home-theater-proj-path", children: p })
+    ] }, p)) }) : /* @__PURE__ */ jsx("div", { className: "home-theater-dim", children: "files touched by the agent will appear here as it works" }),
+    live.subagents.length > 0 && /* @__PURE__ */ jsx("div", { className: "home-theater-proj-subagents", children: live.subagents.map((a) => /* @__PURE__ */ jsxs("div", { className: "home-theater-proj-subagent", children: [
+      /* @__PURE__ */ jsx(
+        "span",
+        {
+          className: `home-theater-proj-subdot ${a.status === "running" ? "run" : "done"}`,
+          "aria-hidden": "true"
+        }
+      ),
+      /* @__PURE__ */ jsx("span", { className: "home-theater-proj-subname", children: a.name }),
+      a.goal && /* @__PURE__ */ jsxs("span", { className: "home-theater-proj-subgoal", children: [
+        "— ",
+        a.goal
+      ] })
+    ] }, a.name)) })
+  ] });
+}
+function CoachPanel({ data, live }) {
+  const recs = useMemo(
+    () => buildRecommendations(data, live),
+    [data, live]
+  );
+  return /* @__PURE__ */ jsxs("section", { className: "home-theater-panel", children: [
+    /* @__PURE__ */ jsx(PanelTitle, { children: "RECOMMENDATIONS" }),
+    /* @__PURE__ */ jsx("div", { className: "home-theater-rec-list", children: recs.map((r, i) => /* @__PURE__ */ jsxs("div", { className: `home-theater-rec ${r.severity}`, children: [
+      /* @__PURE__ */ jsx("span", { className: "home-theater-rec-tag", children: r.severity === "crit" ? "!!" : r.severity === "warn" ? "!" : "i" }),
+      /* @__PURE__ */ jsxs("div", { className: "home-theater-rec-body", children: [
+        /* @__PURE__ */ jsx("div", { className: "home-theater-rec-title", children: r.title }),
+        /* @__PURE__ */ jsx("div", { className: "home-theater-rec-detail", children: r.detail })
+      ] })
+    ] }, i)) })
+  ] });
+}
+function AgentTheater({ data }) {
+  const live = useAgentLive();
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key === "Escape") exitTheater();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+  return /* @__PURE__ */ jsxs("div", { className: "home-theater", role: "dialog", "aria-label": "Agent theater", children: [
+    /* @__PURE__ */ jsxs("header", { className: "home-theater-head", children: [
+      /* @__PURE__ */ jsx("span", { className: `home-agent-dot ${live.busy ? "busy" : ""}`, "aria-hidden": "true" }),
+      /* @__PURE__ */ jsx("span", { className: "home-theater-title", children: "AGENT THEATER" }),
+      /* @__PURE__ */ jsxs("span", { className: "home-theater-sub", children: [
+        live.busy ? "the agent is working" : "the agent is idle",
+        " · ",
+        live.live ? "live feed" : "polling"
+      ] }),
+      /* @__PURE__ */ jsx(
+        "button",
+        {
+          className: "home-theater-release",
+          onClick: () => exitTheater(),
+          title: "Release control (Esc)",
+          children: "release control"
+        }
+      )
+    ] }),
+    /* @__PURE__ */ jsxs("div", { className: "home-theater-grid", children: [
+      /* @__PURE__ */ jsx("div", { className: "home-theater-span-7", children: /* @__PURE__ */ jsx(NowPanel, { data, live }) }),
+      /* @__PURE__ */ jsx("div", { className: "home-theater-span-5", children: /* @__PURE__ */ jsx(ToolPanel, { live }) }),
+      /* @__PURE__ */ jsx("div", { className: "home-theater-span-5", children: /* @__PURE__ */ jsx(TokenPanel, { data }) }),
+      /* @__PURE__ */ jsx("div", { className: "home-theater-span-7", children: /* @__PURE__ */ jsx(ProjectPanel, { data, live }) }),
+      /* @__PURE__ */ jsx("div", { className: "home-theater-span-12", children: /* @__PURE__ */ jsx(CoachPanel, { data, live }) })
+    ] })
+  ] });
+}
 const LAYOUT_VERSION = 2;
 const DEFAULT_LAYOUT = {
   version: LAYOUT_VERSION,
@@ -2371,6 +3309,7 @@ function HomePage() {
   const [editing, setEditing] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
   const [overTrash, setOverTrash] = useState(false);
+  const [theaterOn, setTheaterOn] = useState(false);
   const [toast, setToast] = useState(null);
   const rootRef = useRef(null);
   const catalogRef = useRef(null);
@@ -2378,6 +3317,10 @@ function HomePage() {
   const dirty = useRef(false);
   const toastTimer = useRef(null);
   const data = useHomeData();
+  useEffect(() => subscribeTheater(setTheaterOn), []);
+  useEffect(() => {
+    if (theaterOn && editing) setEditing(false);
+  }, [theaterOn, editing]);
   const showToast = useCallback((msg) => {
     setToast(msg);
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -2508,12 +3451,1838 @@ function HomePage() {
             }
           )
         ] }),
-        toast && /* @__PURE__ */ jsx("div", { className: "home-toast", role: "status", children: toast })
+        toast && /* @__PURE__ */ jsx("div", { className: "home-toast", role: "status", children: toast }),
+        theaterOn && /* @__PURE__ */ jsx(AgentTheater, { data })
       ]
     }
   );
 }
-const homeCss = "/* Home page — rice-style widget grid.\n * Every color routes through --home-accent (the active theme's primary),\n * so switching themes recolors the whole page with zero widget changes.\n * Swap teal (#2dd4bf) stays fixed: it is interaction semantics, not theme. */\n\n.home-root {\n  --home-accent: var(--color-primary, var(--ui-accent, #ffd700));\n  --home-accent-dim: color-mix(in srgb, var(--home-accent) 55%, #000);\n  --home-surface: color-mix(\n    in srgb,\n    var(--home-accent) 6%,\n    var(--ui-editor-surface-background, rgb(10 10 14 / 0.55))\n  );\n  --home-border: color-mix(in srgb, var(--home-accent) 18%, transparent);\n  --home-error: var(--color-destructive, #e25555);\n  position: relative;\n  height: 100%;\n  overflow: auto;\n  font-family: var(--theme-font-mono, ui-monospace, monospace);\n  color: var(--color-foreground, var(--ui-text-primary, #d8dce6));\n}\n\n.home-stage {\n  position: relative;\n  min-height: 60vh;\n  touch-action: none;\n}\n\n.home-widget {\n  position: absolute;\n  border-radius: 8px;\n  padding: 10px 12px;\n  background: var(--home-surface);\n  border: 1px solid var(--home-border);\n  backdrop-filter: blur(12px);\n  -webkit-backdrop-filter: blur(12px);\n  box-shadow: 0 10px 30px rgb(0 0 0 / 0.5);\n  overflow: hidden;\n  transition: left 0.18s ease, top 0.18s ease;\n  container-type: size;\n  font-size: 11px;\n  line-height: 1.5;\n  /* Promote each widget to its own compositor layer so the constantly\n   * repainting matrix canvas doesn't force the neighbours' backdrop-filter\n   * to recompose every frame — that recomposition is what produced the\n   * horizontal flicker sweeping across the glass panels. */\n  transform: translateZ(0);\n  contain: paint;\n}\n.home-root.editing .home-widget { user-select: none; }\n.home-widget.dragging {\n  transition: none;\n  opacity: 0.9;\n  border-color: var(--home-accent);\n  z-index: 50;\n  cursor: grabbing;\n}\n.home-widget.swap-target {\n  border-color: #2dd4bf;\n  box-shadow: 0 0 0 1px rgb(45 212 191 / 0.5), 0 10px 30px rgb(0 0 0 / 0.5);\n}\n/* Over the trash zone — about to be deleted. */\n.home-widget.trashing {\n  opacity: 0.45;\n  border-color: var(--home-error);\n  box-shadow: 0 0 0 1px color-mix(in srgb, var(--home-error) 60%, transparent),\n    0 10px 30px rgb(0 0 0 / 0.5);\n}\n\n/* Floating label that follows the pointer while dragging a new widget in. */\n.home-add-ghost {\n  position: fixed;\n  z-index: 70;\n  transform: translate(-50%, -140%);\n  padding: 4px 10px;\n  border-radius: 6px;\n  font-size: 11px;\n  white-space: nowrap;\n  pointer-events: none;\n  color: var(--home-accent);\n  background: var(--home-surface);\n  border: 1px solid var(--home-accent);\n  backdrop-filter: blur(12px);\n  -webkit-backdrop-filter: blur(12px);\n  box-shadow: 0 8px 24px rgb(0 0 0 / 0.45);\n}\n\n.home-widget .hd {\n  display: block;\n  font-size: 9px;\n  letter-spacing: 0.18em;\n  margin-bottom: 6px;\n  font-weight: 700;\n  text-transform: uppercase;\n  color: var(--home-accent-dim);\n  white-space: nowrap;\n  overflow: hidden;\n}\n.home-widget .hd::before { content: \"── \"; opacity: 0.5; }\n.home-widget .hd::after { content: \" ─────────────────────────────────\"; opacity: 0.3; }\n.home-root.editing .home-widget .hd { cursor: grab; }\n\n.home-widget .rs {\n  position: absolute;\n  right: 2px;\n  bottom: 2px;\n  width: 13px;\n  height: 13px;\n  cursor: nwse-resize;\n  border-right: 2px solid color-mix(in srgb, var(--home-accent) 45%, transparent);\n  border-bottom: 2px solid color-mix(in srgb, var(--home-accent) 45%, transparent);\n  border-radius: 2px;\n  z-index: 3;\n}\n.home-widget .wremove {\n  position: absolute;\n  top: 4px;\n  right: 6px;\n  z-index: 3;\n  background: none;\n  border: none;\n  color: var(--home-error);\n  font-size: 13px;\n  line-height: 1;\n  cursor: pointer;\n  padding: 2px 4px;\n}\n.home-widget .werr { color: var(--home-error); }\n\n/* ── hover controls (contextual chrome, rest mode only) ──\n * Reusable floating control rendered inside a widget body. Hidden by default,\n * fades in while hovering the widget, and fully suppressed in edit mode so it\n * never fights drag/resize. Widgets opt in by rendering <HoverCtl>/<HoverArrows>. */\n.hover-ctl {\n  position: absolute;\n  top: 4px;\n  right: 6px;\n  z-index: 4;\n  display: flex;\n  align-items: center;\n  gap: 4px;\n  opacity: 0;\n  pointer-events: none;\n  transition: opacity 0.18s ease;\n  /* Sits on the glass without a hard edge. */\n  padding: 1px 3px;\n  border-radius: 6px;\n  background: color-mix(in srgb, var(--home-surface) 80%, transparent);\n}\n.home-widget:hover .hover-ctl,\n.hover-ctl:focus-within { opacity: 1; pointer-events: auto; }\n.home-root.editing .hover-ctl { display: none; }\n@media (hover: none) {\n  /* Touch: no hover, so keep controls reachable but understated. */\n  .hover-ctl { opacity: 0.5; pointer-events: auto; }\n}\n\n.hv-arrow {\n  background: none;\n  border: none;\n  cursor: pointer;\n  padding: 0 3px;\n  color: var(--home-accent-dim);\n  font-size: 14px;\n  line-height: 1;\n  font-family: inherit;\n}\n.hv-arrow:hover:not(:disabled) { color: var(--home-accent); }\n.hv-arrow:disabled { opacity: 0.3; cursor: default; }\n.hv-label {\n  font-size: 9px;\n  letter-spacing: 0.1em;\n  text-transform: uppercase;\n  color: var(--home-accent-dim);\n  white-space: nowrap;\n}\n.hv-label-btn {\n  background: none;\n  border: none;\n  cursor: pointer;\n  font: inherit;\n  letter-spacing: 0.1em;\n  padding: 0;\n}\n.hv-label-btn:hover { color: var(--home-accent); }\n\n/* Toggle/option buttons inside a hover control (clock format, host view…). */\n.hv-opt {\n  background: none;\n  border: none;\n  cursor: pointer;\n  font: inherit;\n  font-size: 9px;\n  letter-spacing: 0.08em;\n  text-transform: uppercase;\n  color: var(--home-accent-dim);\n  padding: 0 4px;\n  border-radius: 4px;\n}\n.hv-opt:hover { color: var(--home-accent); }\n.hv-opt.on { color: #000; background: var(--home-accent); }\n\n/* Extra detail that smoothly expands on widget hover (rest mode only). Uses\n * the 0fr→1fr grid trick so it animates real height without a fixed value. */\n.hover-reveal {\n  display: grid;\n  grid-template-rows: 0fr;\n  opacity: 0;\n  transition: grid-template-rows 0.25s ease, opacity 0.2s ease, margin-top 0.25s ease;\n}\n.home-widget:hover .hover-reveal { grid-template-rows: 1fr; opacity: 1; margin-top: 4px; }\n.home-root.editing .hover-reveal { grid-template-rows: 0fr; opacity: 0; margin-top: 0; }\n.hover-reveal > * { overflow: hidden; min-height: 0; }\n\n.home-ghost {\n  position: absolute;\n  border: 1.5px dashed color-mix(in srgb, var(--home-accent) 70%, transparent);\n  border-radius: 8px;\n  background: color-mix(in srgb, var(--home-accent) 7%, transparent);\n  display: none;\n  z-index: 5;\n  pointer-events: none;\n  transition: left 0.18s ease, top 0.18s ease, width 0.18s ease, height 0.18s ease;\n}\n.home-ghost.visible { display: block; }\n.home-ghost.swap {\n  border-color: rgb(45 212 191 / 0.85);\n  background: rgb(45 212 191 / 0.08);\n}\n\n/* ── widget content primitives (responsive to the widget's own size) ── */\n.home-widget .rows { column-gap: 18px; }\n@container (min-width: 380px) {\n  .home-widget .rows { columns: 2; column-rule: 1px solid rgb(255 255 255 / 0.06); }\n}\n@container (min-width: 600px) {\n  .home-widget .rows { columns: 3; }\n}\n.home-widget .row {\n  display: flex;\n  justify-content: space-between;\n  gap: 6px;\n  padding: 1px 0;\n  border-bottom: 1px solid rgb(255 255 255 / 0.04);\n  break-inside: avoid;\n}\n.home-widget .row:last-child { border-bottom: none; }\n\n.home-widget .meters { column-gap: 18px; }\n@container (min-width: 380px) {\n  .home-widget .meters { columns: 2; }\n}\n.home-widget .meter {\n  display: flex;\n  align-items: center;\n  gap: 6px;\n  margin: 3px 0;\n  break-inside: avoid;\n}\n.home-widget .meter .lbl { width: 34px; color: var(--color-muted-foreground, #7d8496); font-size: 10px; }\n.home-widget .meter .track {\n  flex: 1;\n  height: 7px;\n  border-radius: 2px;\n  background: rgb(255 255 255 / 0.07);\n  overflow: hidden;\n}\n.home-widget .meter .fill {\n  height: 100%;\n  background: linear-gradient(90deg, var(--home-accent-dim), var(--home-accent));\n  transition: width 0.6s ease;\n}\n.home-widget .meter .val { width: 44px; text-align: right; font-size: 10px; }\n.home-widget .quota-usage { display: flex; flex-direction: column; gap: 3px; }\n.home-widget .quota-window { break-inside: avoid; }\n.home-widget .quota-meter .lbl { width: 58px; white-space: nowrap; }\n.home-widget .quota-meter .val { width: 76px; white-space: nowrap; }\n.home-widget .quota-reset,\n.home-widget .quota-updated { font-size: 9px; line-height: 1.3; text-align: right; }\n.home-widget .quota-critical { background: var(--home-error); }\n.home-widget .quota-warning { background: var(--color-warning, var(--home-accent)); }\n.home-widget .quota-updated { margin-top: 2px; }\n\n.home-widget .ok { color: var(--home-accent); }\n.home-widget .dim { color: var(--color-muted-foreground, #6b7387); }\n.home-widget .bigval {\n  font-size: min(9cqw, 18cqh);\n  font-weight: 700;\n  color: var(--home-accent);\n}\n\n.home-clock-wrap {\n  display: flex;\n  flex-direction: column;\n  align-items: center;\n  justify-content: center;\n  height: calc(100% - 18px);\n}\n.home-clock {\n  font-size: min(26cqw, 52cqh);\n  font-weight: 800;\n  color: var(--home-accent);\n  letter-spacing: 0.02em;\n  text-shadow: 0 0 24px color-mix(in srgb, var(--home-accent) 35%, transparent);\n  line-height: 1;\n}\n.home-clock-ampm {\n  font-size: 0.32em;\n  vertical-align: 0.9em;\n  margin-left: 0.2em;\n  letter-spacing: 0.05em;\n  color: var(--home-accent-dim);\n}\n.home-clock-sub {\n  color: var(--home-accent-dim);\n  font-size: max(9px, min(3.4cqw, 8cqh));\n  letter-spacing: 0.14em;\n  text-transform: uppercase;\n  margin-top: 1cqh;\n}\n\n.home-ascii-wrap {\n  display: flex;\n  flex-direction: column;\n  align-items: center;\n  justify-content: center;\n  height: calc(100% - 18px);\n}\n.home-ascii {\n  font-size: min(5.6cqw, 5.4cqh);\n  line-height: 1.05;\n  white-space: pre;\n  text-align: center;\n  background: linear-gradient(\n    180deg,\n    var(--home-accent-dim),\n    var(--home-accent) 40%,\n    var(--home-accent) 60%,\n    var(--home-accent-dim)\n  );\n  -webkit-background-clip: text;\n  background-clip: text;\n  color: transparent;\n  filter: drop-shadow(0 0 10px color-mix(in srgb, var(--home-accent) 25%, transparent));\n}\n.home-ascii-caduceus {\n  transform: scaleX(0.88);\n  transform-origin: center;\n}\n.home-ascii-ver {\n  text-align: center;\n  color: var(--home-accent-dim);\n  font-size: max(8px, min(2.6cqw, 5cqh));\n  letter-spacing: 0.22em;\n  margin-top: 1.5cqh;\n}\n\n.home-spark {\n  display: flex;\n  align-items: flex-end;\n  gap: 2px;\n  height: max(18px, 22cqh);\n  margin: 6px 0 4px;\n}\n.home-spark i {\n  flex: 1;\n  background: linear-gradient(180deg, var(--home-accent), var(--home-accent-dim));\n  border-radius: 1px 1px 0 0;\n  opacity: 0.85;\n  transition: height 0.6s ease, opacity 0.15s ease;\n  cursor: default;\n}\n.home-spark i:hover { opacity: 1; }\n\n/* Hover tooltip over a bar (tokens widget). Anchored to the bar via inline\n * `left` + `translateX`, which clamps it inside the clipped widget; the appear/\n * disappear slide+fade runs on the independent `translate` property so it never\n * fights the positioning transform. */\n.home-spark-wrap { position: relative; }\n.home-spark-tip {\n  position: absolute;\n  bottom: 100%;\n  margin-bottom: 6px;\n  padding: 3px 7px;\n  border-radius: 6px;\n  background: color-mix(in srgb, var(--home-accent) 10%, rgb(8 8 12 / 0.96));\n  border: 1px solid var(--home-border);\n  color: rgb(236 236 242);\n  font-size: 10px;\n  line-height: 1.3;\n  white-space: nowrap;\n  pointer-events: none;\n  opacity: 0;\n  translate: 0 4px;\n  transition: opacity 0.18s ease, translate 0.18s ease, transform 0.18s ease;\n  z-index: 6;\n}\n.home-spark-tip.show { opacity: 1; translate: 0 0; }\n.home-spark-tip b { color: var(--home-accent); font-weight: 600; }\n\n/* Line/area chart (tokens widget, alternative to the bars). Stretched to fill\n * via preserveAspectRatio=none; the stroke stays crisp with non-scaling-stroke. */\n.home-area {\n  display: block;\n  width: 100%;\n  height: max(18px, 22cqh);\n  margin: 6px 0 4px;\n  overflow: visible;\n}\n.home-area rect { cursor: default; }\n\n/* Host graphs view: four live sparklines (cpu / ram / load / proc) in a 2×2\n * grid over a rolling one-minute window. Fills the widget below the header\n * (same absolute pattern as the canvas widgets); cells reuse .home-area but\n * stretch to their cell height instead of the tokens widget's fixed band. */\n.host-sparks {\n  position: absolute;\n  inset: 30px 12px 10px;\n  display: grid;\n  grid-template-columns: 1fr 1fr;\n  grid-template-rows: 1fr 1fr;\n  gap: 4px 12px;\n  min-height: 0;\n}\n.host-spark {\n  display: flex;\n  flex-direction: column;\n  min-height: 0;\n  min-width: 0;\n}\n.host-spark-head {\n  display: flex;\n  justify-content: space-between;\n  align-items: baseline;\n  font-size: max(8px, min(3.2cqw, 6cqh));\n  letter-spacing: 0.14em;\n  text-transform: uppercase;\n}\n.host-spark-head .val {\n  font-variant-numeric: tabular-nums;\n  color: var(--home-accent);\n}\n.host-spark .home-area {\n  flex: 1;\n  height: auto;\n  min-height: 12px;\n  margin: 2px 0 0;\n}\n\n/* Small vertical divider between the range arrows and the toggles. */\n.tok-div {\n  width: 1px;\n  align-self: stretch;\n  margin: 2px 2px;\n  background: var(--home-border);\n}\n\n/* Totals line, regrouped: each label sticks to its value, groups spaced evenly\n * (the old `.row` space-between scattered the six tokens across the full width). */\n.tok-stats {\n  display: flex;\n  flex-wrap: wrap;\n  gap: 2px 14px;\n  padding: 3px 0 1px;\n  font-variant-numeric: tabular-nums;\n}\n.tok-stats > span { white-space: nowrap; }\n.tok-stats .dim { margin-right: 2px; }\n\n/* ── logs widget (per-file record list) ── */\n.logs-sub {\n  display: flex;\n  justify-content: space-between;\n  align-items: baseline;\n  gap: 8px;\n}\n.logs-file {\n  font-size: 11px;\n  font-weight: 600;\n  letter-spacing: 0.06em;\n  color: var(--home-accent);\n}\n.home-logs {\n  display: flex;\n  flex-direction: column;\n  gap: 1px;\n  height: calc(100% - 40px);\n  overflow-y: auto;\n  margin-top: 3px;\n}\n.log-row {\n  display: flex;\n  gap: 6px;\n  align-items: baseline;\n  padding: 1px 0;\n  border-bottom: 1px solid rgb(255 255 255 / 0.04);\n  cursor: default;\n}\n.log-row:last-child { border-bottom: none; }\n.log-lvl {\n  flex: none;\n  width: 32px;\n  font-size: 9px;\n  font-weight: 600;\n  letter-spacing: 0.03em;\n}\n.log-lvl.lvl-error { color: var(--home-error); }\n.log-lvl.lvl-warn { color: #f5b945; }\n.log-lvl.lvl-info { color: var(--color-muted-foreground, #6b7387); }\n.log-msg {\n  flex: 1;\n  min-width: 0;\n  font-size: 10px;\n  white-space: nowrap;\n  overflow: hidden;\n  text-overflow: ellipsis;\n}\n\n.home-matrix-c {\n  position: absolute;\n  inset: 0;\n  top: 24px;\n  width: 100%;\n  height: calc(100% - 24px);\n}\n\n/* ── notes widget ── */\n.home-notes { display: flex; flex-direction: column; gap: 1px; height: calc(100% - 18px); overflow-y: auto; }\n.home-notes .note-row {\n  display: flex;\n  align-items: baseline;\n  gap: 7px;\n  padding: 1px 0;\n  border-bottom: 1px solid rgb(255 255 255 / 0.04);\n}\n.home-notes .note-mark {\n  cursor: pointer;\n  width: 12px;\n  text-align: center;\n  color: var(--home-accent);\n  flex-shrink: 0;\n}\n.home-notes .note-mark.done { color: var(--color-muted-foreground, #6b7387); }\n.home-notes .note-text { cursor: text; flex: 1; min-width: 0; overflow-wrap: anywhere; }\n.home-notes .note-text.done {\n  text-decoration: line-through;\n  color: var(--color-muted-foreground, #6b7387);\n}\n.home-notes .note-input {\n  flex: 1;\n  min-width: 0;\n  background: none;\n  border: none;\n  border-bottom: 1px dashed var(--home-border);\n  outline: none;\n  color: inherit;\n  font: inherit;\n  padding: 0;\n}\n.home-notes .note-add {\n  align-self: flex-start;\n  margin-top: 4px;\n  background: none;\n  border: none;\n  cursor: pointer;\n  color: var(--home-accent-dim);\n  font-size: 14px;\n  line-height: 1;\n  padding: 2px 6px 2px 2px;\n}\n.home-notes .note-add:hover { color: var(--home-accent); }\n\n/* ── canvas widgets (heartbeat, life) ── */\n.home-canvas {\n  position: absolute;\n  inset: 0;\n  top: 24px;\n  width: 100%;\n  height: calc(100% - 24px);\n}\n/* Life is drawable in rest mode — signal it with a crosshair. */\n.home-root:not(.editing) .home-life { cursor: crosshair; }\n\n/* ── moon ── */\n.home-moon-wrap {\n  display: flex;\n  flex-direction: column;\n  align-items: center;\n  height: calc(100% - 18px);\n}\n.home-moon-c { flex: 1; width: 100%; min-height: 0; }\n.home-moon-label {\n  color: var(--home-accent-dim);\n  font-size: max(8px, min(3cqw, 6cqh));\n  letter-spacing: 0.14em;\n  text-transform: uppercase;\n}\n\n/* ── pomodoro / countdown ── */\n.home-pomo .home-clock,\n.home-count .home-clock { cursor: pointer; }\n.home-pomo .home-clock.paused { opacity: 0.55; }\n.home-pomo .pomo-sub { cursor: pointer; }\n.home-count .count-label { cursor: pointer; }\n.home-count .count-input,\n.home-pomo .count-input { max-width: 92%; text-align: center; color-scheme: dark; }\n\n/* ── countdown segment editor (alarm-style spinners) ── */\n.count-edit {\n  display: flex;\n  flex-direction: column;\n  align-items: center;\n  justify-content: center;\n  gap: 3px;\n  height: calc(100% - 18px);\n}\n.count-edit-row { display: flex; align-items: center; gap: 5px; }\n.count-seg { display: flex; flex-direction: column; align-items: center; }\n.count-seg .seg-btn {\n  background: none;\n  border: none;\n  cursor: pointer;\n  padding: 0;\n  line-height: 0.6;\n  font-size: 8px;\n  color: var(--home-accent-dim);\n}\n.count-seg .seg-btn:hover { color: var(--home-accent); }\n.count-seg .seg-val {\n  background: none;\n  border: none;\n  outline: none;\n  text-align: center;\n  color: var(--home-accent);\n  font: inherit;\n  font-weight: 800;\n  font-size: max(12px, min(7cqw, 15cqh));\n  padding: 1px 0;\n  border-bottom: 1px solid transparent;\n  letter-spacing: 0.02em;\n}\n.count-seg input.seg-val:focus { border-bottom-color: var(--home-accent); }\n.count-seg .seg-static { cursor: default; }\n.count-colon {\n  font-weight: 800;\n  color: var(--home-accent-dim);\n  font-size: max(12px, min(7cqw, 15cqh));\n}\n.count-done {\n  margin-top: 3px;\n  background: none;\n  border: 1px solid var(--home-border);\n  border-radius: 6px;\n  color: var(--home-accent);\n  cursor: pointer;\n  font: inherit;\n  font-size: 10px;\n  letter-spacing: 0.08em;\n  text-transform: uppercase;\n  padding: 2px 12px;\n}\n.count-done:hover { border-color: var(--home-accent); }\n.home-pomo .pomo-min {\n  font-size: min(20cqw, 40cqh);\n  font-weight: 800;\n  color: var(--home-accent);\n  max-width: 70%;\n}\n/* Hover steppers for the pomodoro work/break lengths. */\n.hover-ctl.pomo-set { flex-direction: column; align-items: flex-end; gap: 1px; }\n.pomo-stepper { display: flex; align-items: center; gap: 3px; }\n.pomo-stepper .hv-label:nth-child(3) { min-width: 16px; text-align: center; color: var(--home-accent); }\n\n/* ── calendar ── */\n.home-cal { height: calc(100% - 18px); display: flex; flex-direction: column; }\n.home-cal-month {\n  text-align: center;\n  color: var(--home-accent-dim);\n  font-size: max(9px, min(3.2cqw, 7cqh));\n  letter-spacing: 0.14em;\n  text-transform: uppercase;\n  margin-bottom: 4px;\n}\n.home-cal-grid {\n  flex: 1;\n  display: grid;\n  grid-template-columns: repeat(7, 1fr);\n  align-content: space-evenly;\n  justify-items: center;\n  font-size: max(8px, min(3cqw, 6.5cqh));\n}\n.home-cal-h { color: var(--color-muted-foreground, #6b7387); }\n.home-cal-d { color: var(--color-foreground, #d8dce6); opacity: 0.75; }\n.home-cal-today {\n  color: #000;\n  background: var(--home-accent);\n  border-radius: 4px;\n  padding: 0 4px;\n  font-weight: 700;\n}\n/* Density tiers, chosen from the widget's cell width (see CalendarWidget). */\n.home-cal.tier-mini .home-cal-month {\n  font-size: max(8px, min(4cqw, 8cqh));\n  margin-bottom: 2px;\n}\n.home-cal.tier-mini .home-cal-grid { font-size: max(9px, min(4cqw, 8cqh)); }\n.home-cal.tier-large .home-cal-month {\n  font-size: max(11px, min(3cqw, 7cqh));\n  margin-bottom: 7px;\n}\n.home-cal.tier-large .home-cal-grid { row-gap: 3px; }\n.home-cal.tier-large .home-cal-h { font-weight: 700; opacity: 0.8; }\n.home-cal.tier-large .home-cal-today { padding: 1px 6px; }\n\n/* ── page chrome ── */\n/* Edit affordance lives BELOW the grid, centered. It fades in once the user\n * starts scrolling down (or immediately when the grid is short enough that\n * there's nothing to scroll), keeping the home clean on first paint. While\n * editing it sticks to the bottom of the viewport so it stays reachable. */\n.home-editbar {\n  display: flex;\n  justify-content: center;\n  gap: 10px;\n  padding: 22px 12px 30px;\n  opacity: 0;\n  transition: opacity 0.25s ease;\n  pointer-events: none;\n}\n.home-editbar.visible {\n  opacity: 1;\n  pointer-events: auto;\n}\n.home-root.editing .home-editbar {\n  position: sticky;\n  bottom: 0;\n}\n.home-fab {\n  position: relative;\n  width: 38px;\n  height: 38px;\n  border-radius: 50%;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  font-size: 15px;\n  cursor: pointer;\n  color: var(--home-accent);\n  background: var(--home-surface);\n  border: 1px solid var(--home-border);\n  backdrop-filter: blur(12px);\n  -webkit-backdrop-filter: blur(12px);\n  transition:\n    border-color 0.25s ease,\n    background 0.35s ease,\n    box-shadow 0.45s ease,\n    transform 0.4s cubic-bezier(0.34, 1.4, 0.64, 1);\n}\n.home-fab:hover {\n  border-color: var(--home-accent);\n  transform: scale(1.06);\n}\n.home-fab:active { transform: scale(0.94); }\n.home-fab.active {\n  background: color-mix(in srgb, var(--home-accent) 22%, transparent);\n  /* Warm Hermes glow ring when edit mode engages. */\n  animation: home-fab-glow 0.55s ease-out;\n}\n\n/* Crossfading edit ✎ ↔ done ✓ glyphs — each rotates and scales through the\n * swap with a gentle overshoot, matching the dashboard's soft motion. */\n.home-fab-ico {\n  position: absolute;\n  inset: 0;\n  display: flex;\n  align-items: center;\n  justify-content: center;\n  transition:\n    opacity 0.3s ease,\n    transform 0.45s cubic-bezier(0.34, 1.45, 0.64, 1);\n}\n.ico-edit { opacity: 1; transform: rotate(0) scale(1); }\n.ico-done { opacity: 0; transform: rotate(-120deg) scale(0.3); }\n.home-fab.active .ico-edit { opacity: 0; transform: rotate(120deg) scale(0.3); }\n.home-fab.active .ico-done { opacity: 1; transform: rotate(0) scale(1); }\n\n.home-fab-spin {\n  display: inline-block;\n  animation: home-fab-spin-in 0.5s cubic-bezier(0.34, 1.4, 0.64, 1);\n}\n\n/* The restore-default button slides up into place, like the dashboard's\n * dialog-in entrance. */\n.home-fab-enter {\n  animation: home-fab-enter 0.32s cubic-bezier(0.34, 1.3, 0.64, 1);\n}\n\n@keyframes home-fab-glow {\n  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--home-accent) 55%, transparent); }\n  100% { box-shadow: 0 0 0 13px transparent; }\n}\n@keyframes home-fab-spin-in {\n  from { transform: rotate(-150deg); opacity: 0.3; }\n  to   { transform: rotate(0); opacity: 1; }\n}\n@keyframes home-fab-enter {\n  from { opacity: 0; transform: translateY(6px) scale(0.9); }\n  to   { opacity: 1; transform: translateY(0) scale(1); }\n}\n\n@media (prefers-reduced-motion: reduce) {\n  .home-fab,\n  .home-fab-ico,\n  .home-fab-spin,\n  .home-fab-enter { animation: none; transition: opacity 0.2s ease; }\n}\n\n/* ── toast (plugin-local; the host toast isn't exposed in the SDK) ── */\n.home-toast {\n  position: fixed;\n  bottom: 18px;\n  left: 50%;\n  transform: translateX(-50%);\n  z-index: 80;\n  padding: 8px 16px;\n  border-radius: 8px;\n  font-size: 12px;\n  color: var(--home-error, #e25555);\n  background: var(--home-surface);\n  border: 1px solid var(--home-error, #e25555);\n  backdrop-filter: blur(12px);\n  -webkit-backdrop-filter: blur(12px);\n  box-shadow: 0 8px 24px rgb(0 0 0 / 0.45);\n  animation: home-toast-in 0.25s ease;\n}\n@keyframes home-toast-in {\n  from { opacity: 0; transform: translateX(-50%) translateY(8px); }\n  to { opacity: 1; transform: translateX(-50%) translateY(0); }\n}\n\n/* Catalog reveal: the wrapper animates its row track 0fr → 1fr so the panel\n * grows/collapses its real height smoothly (no grid jump), with a matching\n * fade. Kept mounted so the exit animates too. */\n.home-catalog-wrap {\n  display: grid;\n  grid-template-rows: 0fr;\n  margin: 0 12px;\n  opacity: 0;\n  pointer-events: none;\n  transition:\n    grid-template-rows 0.34s cubic-bezier(0.34, 1.2, 0.64, 1),\n    opacity 0.28s ease,\n    margin-bottom 0.34s ease;\n}\n.home-catalog-wrap.open {\n  grid-template-rows: 1fr;\n  opacity: 1;\n  pointer-events: auto;\n  margin-bottom: 8px;\n}\n.home-catalog {\n  overflow: hidden;\n  min-height: 0;\n  border-radius: 8px;\n  background: var(--home-surface);\n  border: 1px solid var(--home-border);\n  backdrop-filter: blur(12px);\n  -webkit-backdrop-filter: blur(12px);\n  transition: border-color 0.2s ease, background 0.2s ease;\n}\n/* Highlighted as a delete target while a widget is dragged over it. */\n.home-catalog-wrap.trash-active .home-catalog {\n  border-color: var(--home-error);\n  border-style: dashed;\n  background: color-mix(in srgb, var(--home-error) 10%, var(--home-surface));\n}\n.home-catalog-inner {\n  display: flex;\n  flex-wrap: wrap;\n  align-items: center;\n  gap: 8px;\n  padding: 10px;\n}\n.home-catalog-hint {\n  font-size: 10px;\n  letter-spacing: 0.04em;\n  color: var(--color-muted-foreground, #6b7387);\n  margin-right: 4px;\n}\n.home-catalog-wrap.trash-active .home-catalog-hint { color: var(--home-error); }\n.home-catalog-chip { touch-action: none; }\n.home-catalog-chip {\n  font-family: inherit;\n  font-size: 11px;\n  padding: 4px 10px;\n  border-radius: 6px;\n  cursor: pointer;\n  background: none;\n  border: 1px dashed var(--home-border);\n  color: var(--color-foreground, #d8dce6);\n  transition: border-color 0.2s ease, color 0.2s ease, transform 0.2s ease;\n}\n.home-catalog-chip:hover {\n  border-color: var(--home-accent);\n  color: var(--home-accent);\n  transform: translateY(-1px);\n}\n.home-catalog-chip:active { transform: scale(0.95); }\n.home-catalog .empty { color: var(--color-muted-foreground, #6b7387); font-size: 11px; }\n\n@media (prefers-reduced-motion: reduce) {\n  .home-catalog-wrap { transition: opacity 0.2s ease; }\n}\n";
+const homeCss = `/* Home page — rice-style widget grid.
+ * Every color routes through --home-accent (the active theme's primary),
+ * so switching themes recolors the whole page with zero widget changes.
+ * Swap teal (#2dd4bf) stays fixed: it is interaction semantics, not theme. */
+
+.home-root {
+  --home-accent: var(--color-primary, var(--ui-accent, #ffd700));
+  --home-accent-dim: color-mix(in srgb, var(--home-accent) 55%, #000);
+  /* Readable secondary text (headers, captions): dim was ~3:1 on the glass. */
+  --home-accent-soft: color-mix(in srgb, var(--home-accent) 82%, #9aa3b5);
+  --home-surface: color-mix(
+    in srgb,
+    var(--home-accent) 6%,
+    var(--ui-editor-surface-background, rgb(10 10 14 / 0.55))
+  );
+  --home-border: color-mix(in srgb, var(--home-accent) 18%, transparent);
+  --home-error: var(--color-destructive, #e25555);
+  position: relative;
+  height: 100%;
+  overflow: auto;
+  font-family: var(--theme-font-mono, ui-monospace, monospace);
+  color: var(--color-foreground, var(--ui-text-primary, #d8dce6));
+}
+
+.home-stage {
+  position: relative;
+  min-height: 60vh;
+  touch-action: none;
+}
+
+.home-widget {
+  position: absolute;
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--home-surface);
+  border: 1px solid var(--home-border);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.5);
+  overflow: hidden;
+  transition: left 0.18s ease, top 0.18s ease;
+  container-type: size;
+  font-size: 11px;
+  line-height: 1.5;
+  /* Promote each widget to its own compositor layer so the constantly
+   * repainting matrix canvas doesn't force the neighbours' backdrop-filter
+   * to recompose every frame — that recomposition is what produced the
+   * horizontal flicker sweeping across the glass panels. */
+  transform: translateZ(0);
+  contain: paint;
+}
+.home-root.editing .home-widget { user-select: none; }
+.home-widget.dragging {
+  transition: none;
+  opacity: 0.9;
+  border-color: var(--home-accent);
+  z-index: 50;
+  cursor: grabbing;
+}
+.home-widget.swap-target {
+  border-color: #2dd4bf;
+  box-shadow: 0 0 0 1px rgb(45 212 191 / 0.5), 0 10px 30px rgb(0 0 0 / 0.5);
+}
+/* Over the trash zone — about to be deleted. */
+.home-widget.trashing {
+  opacity: 0.45;
+  border-color: var(--home-error);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--home-error) 60%, transparent),
+    0 10px 30px rgb(0 0 0 / 0.5);
+}
+
+/* Floating label that follows the pointer while dragging a new widget in. */
+.home-add-ghost {
+  position: fixed;
+  z-index: 70;
+  transform: translate(-50%, -140%);
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  white-space: nowrap;
+  pointer-events: none;
+  color: var(--home-accent);
+  background: var(--home-surface);
+  border: 1px solid var(--home-accent);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.45);
+}
+
+.home-widget .hd {
+  display: block;
+  font-size: 9.5px;
+  letter-spacing: 0.18em;
+  margin-bottom: 6px;
+  font-weight: 700;
+  text-transform: uppercase;
+  color: var(--home-accent-soft);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.home-widget .hd::before { content: "── "; opacity: 0.5; }
+.home-widget .hd::after { content: " ─────────────────────────────────"; opacity: 0.3; }
+.home-root.editing .home-widget .hd { cursor: grab; }
+
+.home-widget .rs {
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 13px;
+  height: 13px;
+  cursor: nwse-resize;
+  border-right: 2px solid color-mix(in srgb, var(--home-accent) 45%, transparent);
+  border-bottom: 2px solid color-mix(in srgb, var(--home-accent) 45%, transparent);
+  border-radius: 2px;
+  z-index: 3;
+}
+.home-widget .wremove {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  z-index: 3;
+  background: none;
+  border: none;
+  color: var(--home-error);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+}
+.home-widget .werr { color: var(--home-error); }
+/* Data-source states (widget-state.ts): honest copy per failure kind. */
+.home-widget .wstate { display: block; font-size: 10px; letter-spacing: 0.04em; }
+.home-widget .wstate::before { content: "● "; }
+.home-widget .wstate-offline { color: var(--home-error); }
+.home-widget .wstate-unavailable { color: #f5b945; }
+.home-widget .hd .hd-stale { color: #f5b945; letter-spacing: 0.1em; opacity: 0.8; }
+
+/* ── hover controls (contextual chrome, rest mode only) ──
+ * Reusable floating control rendered inside a widget body. Hidden by default,
+ * fades in while hovering the widget, and fully suppressed in edit mode so it
+ * never fights drag/resize. Widgets opt in by rendering <HoverCtl>/<HoverArrows>. */
+.hover-ctl {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+  /* Sits on the glass without a hard edge. */
+  padding: 1px 3px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--home-surface) 80%, transparent);
+}
+.home-widget:hover .hover-ctl,
+.hover-ctl:focus-within { opacity: 1; pointer-events: auto; }
+.home-root.editing .hover-ctl { display: none; }
+@media (hover: none) {
+  /* Touch: no hover, so keep controls reachable but understated. */
+  .hover-ctl { opacity: 0.5; pointer-events: auto; }
+}
+
+.hv-arrow {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0 3px;
+  color: var(--home-accent-dim);
+  font-size: 14px;
+  line-height: 1;
+  font-family: inherit;
+}
+.hv-arrow:hover:not(:disabled) { color: var(--home-accent); }
+.hv-arrow:disabled { opacity: 0.3; cursor: default; }
+.hv-label {
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--home-accent-dim);
+  white-space: nowrap;
+}
+.hv-label-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  letter-spacing: 0.1em;
+  padding: 0;
+}
+.hv-label-btn:hover { color: var(--home-accent); }
+
+/* Toggle/option buttons inside a hover control (clock format, host view…). */
+.hv-opt {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--home-accent-dim);
+  padding: 0 4px;
+  border-radius: 4px;
+}
+.hv-opt:hover { color: var(--home-accent); }
+.hv-opt.on { color: #000; background: var(--home-accent); }
+
+/* Extra detail that smoothly expands on widget hover (rest mode only). Uses
+ * the 0fr→1fr grid trick so it animates real height without a fixed value. */
+.hover-reveal {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 0.25s ease, opacity 0.2s ease, margin-top 0.25s ease;
+}
+.home-widget:hover .hover-reveal { grid-template-rows: 1fr; opacity: 1; margin-top: 4px; }
+.home-root.editing .hover-reveal { grid-template-rows: 0fr; opacity: 0; margin-top: 0; }
+.hover-reveal > * { overflow: hidden; min-height: 0; }
+
+.home-ghost {
+  position: absolute;
+  border: 1.5px dashed color-mix(in srgb, var(--home-accent) 70%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--home-accent) 7%, transparent);
+  display: none;
+  z-index: 5;
+  pointer-events: none;
+  transition: left 0.18s ease, top 0.18s ease, width 0.18s ease, height 0.18s ease;
+}
+.home-ghost.visible { display: block; }
+.home-ghost.swap {
+  border-color: rgb(45 212 191 / 0.85);
+  background: rgb(45 212 191 / 0.08);
+}
+
+/* ── widget content primitives (responsive to the widget's own size) ── */
+.home-widget .rows { column-gap: 18px; }
+@container (min-width: 380px) {
+  .home-widget .rows { columns: 2; column-rule: 1px solid rgb(255 255 255 / 0.06); }
+}
+@container (min-width: 600px) {
+  .home-widget .rows { columns: 3; }
+}
+.home-widget .row {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 1px 0;
+  border-bottom: 1px solid rgb(255 255 255 / 0.04);
+  break-inside: avoid;
+}
+.home-widget .row:last-child { border-bottom: none; }
+/* Names flex and ellipsize at the real column width instead of a fixed
+ * character slice that cut words mid-glyph ("bitacoras-guayab"). */
+.home-widget .row > * { flex: none; }
+.home-widget .row > .row-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.home-widget .meters { column-gap: 18px; }
+@container (min-width: 380px) {
+  .home-widget .meters { columns: 2; }
+}
+.home-widget .meter {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 3px 0;
+  break-inside: avoid;
+}
+.home-widget .meter .lbl { width: 34px; color: var(--color-muted-foreground, #7d8496); font-size: 10px; }
+.home-widget .meter .track {
+  flex: 1;
+  height: 7px;
+  border-radius: 2px;
+  background: rgb(255 255 255 / 0.07);
+  overflow: hidden;
+}
+.home-widget .meter .fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--home-accent-dim), var(--home-accent));
+  transition: width 0.6s ease;
+}
+.home-widget .meter .val { width: 44px; text-align: right; font-size: 10px; }
+.home-widget .quota-usage { display: flex; flex-direction: column; gap: 3px; }
+.home-widget .quota-window { break-inside: avoid; }
+.home-widget .quota-meter .lbl { width: 58px; white-space: nowrap; }
+.home-widget .quota-meter .val { width: 76px; white-space: nowrap; }
+.home-widget .quota-reset,
+.home-widget .quota-updated { font-size: 9px; line-height: 1.3; text-align: right; }
+.home-widget .quota-critical { background: var(--home-error); }
+.home-widget .quota-warning { background: var(--color-warning, var(--home-accent)); }
+.home-widget .quota-updated { margin-top: 2px; }
+
+.home-widget .ok { color: var(--home-accent); }
+.home-widget .dim { color: var(--color-muted-foreground, #6b7387); }
+.home-widget .bigval {
+  font-size: min(9cqw, 18cqh);
+  font-weight: 700;
+  color: var(--home-accent);
+}
+
+.home-clock-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: calc(100% - 18px);
+}
+.home-clock {
+  font-size: min(26cqw, 52cqh);
+  font-weight: 800;
+  color: var(--home-accent);
+  letter-spacing: 0.02em;
+  text-shadow: 0 0 24px color-mix(in srgb, var(--home-accent) 35%, transparent);
+  line-height: 1;
+}
+.home-clock-ampm {
+  font-size: 0.32em;
+  vertical-align: 0.9em;
+  margin-left: 0.2em;
+  letter-spacing: 0.05em;
+  color: var(--home-accent-dim);
+}
+.home-clock-sub {
+  color: var(--home-accent-dim);
+  font-size: max(9px, min(3.4cqw, 8cqh));
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin-top: 1cqh;
+}
+
+.home-ascii-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: calc(100% - 18px);
+}
+.home-ascii {
+  font-size: min(5.6cqw, 5.4cqh);
+  line-height: 1.05;
+  white-space: pre;
+  text-align: center;
+  background: linear-gradient(
+    180deg,
+    var(--home-accent-dim),
+    var(--home-accent) 40%,
+    var(--home-accent) 60%,
+    var(--home-accent-dim)
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 0 10px color-mix(in srgb, var(--home-accent) 25%, transparent));
+}
+.home-ascii-caduceus {
+  transform: scaleX(0.88);
+  transform-origin: center;
+}
+.home-ascii-ver {
+  text-align: center;
+  color: var(--home-accent-soft);
+  font-size: max(8px, min(2.6cqw, 5cqh));
+  letter-spacing: 0.22em;
+  margin-top: 1.5cqh;
+}
+
+.home-spark {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: max(18px, 22cqh);
+  margin: 6px 0 4px;
+}
+.home-spark i {
+  flex: 1;
+  background: linear-gradient(180deg, var(--home-accent), var(--home-accent-dim));
+  border-radius: 1px 1px 0 0;
+  opacity: 0.85;
+  transition: height 0.6s ease, opacity 0.15s ease;
+  cursor: default;
+}
+.home-spark i:hover { opacity: 1; }
+
+/* Hover tooltip over a bar (tokens widget). Anchored to the bar via inline
+ * \`left\` + \`translateX\`, which clamps it inside the clipped widget; the appear/
+ * disappear slide+fade runs on the independent \`translate\` property so it never
+ * fights the positioning transform. */
+.home-spark-wrap { position: relative; }
+.home-spark-tip {
+  position: absolute;
+  bottom: 100%;
+  margin-bottom: 6px;
+  padding: 3px 7px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--home-accent) 10%, rgb(8 8 12 / 0.96));
+  border: 1px solid var(--home-border);
+  color: rgb(236 236 242);
+  font-size: 10px;
+  line-height: 1.3;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  translate: 0 4px;
+  transition: opacity 0.18s ease, translate 0.18s ease, transform 0.18s ease;
+  z-index: 6;
+}
+.home-spark-tip.show { opacity: 1; translate: 0 0; }
+.home-spark-tip b { color: var(--home-accent); font-weight: 600; }
+
+/* Line/area chart (tokens widget, alternative to the bars). Stretched to fill
+ * via preserveAspectRatio=none; the stroke stays crisp with non-scaling-stroke. */
+.home-area {
+  display: block;
+  width: 100%;
+  height: max(18px, 22cqh);
+  margin: 6px 0 4px;
+  overflow: visible;
+}
+.home-area rect { cursor: default; }
+
+/* Host graphs view: four live sparklines (cpu / ram / load / proc) in a 2×2
+ * grid over a rolling one-minute window. Fills the widget below the header
+ * (same absolute pattern as the canvas widgets); cells reuse .home-area but
+ * stretch to their cell height instead of the tokens widget's fixed band. */
+.host-sparks {
+  position: absolute;
+  inset: 30px 12px 10px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 4px 12px;
+  min-height: 0;
+}
+.host-spark {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+.host-spark-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: max(8px, min(3.2cqw, 6cqh));
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.host-spark-head .val {
+  font-variant-numeric: tabular-nums;
+  color: var(--home-accent);
+}
+.host-spark .home-area {
+  flex: 1;
+  height: auto;
+  min-height: 12px;
+  margin: 2px 0 0;
+}
+
+/* Small vertical divider between the range arrows and the toggles. */
+.tok-div {
+  width: 1px;
+  align-self: stretch;
+  margin: 2px 2px;
+  background: var(--home-border);
+}
+
+/* Totals line, regrouped: each label sticks to its value, groups spaced evenly
+ * (the old \`.row\` space-between scattered the six tokens across the full width). */
+.tok-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 14px;
+  padding: 3px 0 1px;
+  font-variant-numeric: tabular-nums;
+}
+.tok-stats > span { white-space: nowrap; }
+.tok-stats .dim { margin-right: 2px; }
+
+/* ── logs widget (per-file record list) ── */
+.logs-sub {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+}
+.logs-file {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--home-accent);
+}
+/* The wrapper owns the widget's remaining height so the list scrolls inside it
+ * instead of growing past the bottom edge (the old calc() resolved against an
+ * auto-height parent and never clamped). */
+.home-logs-wrap {
+  display: flex;
+  flex-direction: column;
+  height: calc(100% - 21px);
+  min-height: 0;
+}
+.home-logs {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  margin-top: 3px;
+  /* Rows that don't fit fade out instead of being sliced by the edge. */
+  mask-image: linear-gradient(180deg, #000 calc(100% - 14px), transparent);
+}
+.log-row {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  padding: 1px 0;
+  border-bottom: 1px solid rgb(255 255 255 / 0.04);
+  cursor: default;
+}
+.log-row:last-child { border-bottom: none; }
+.log-lvl {
+  flex: none;
+  width: 32px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+.log-lvl.lvl-error { color: var(--home-error); }
+.log-lvl.lvl-warn { color: #f5b945; }
+.log-lvl.lvl-info { color: var(--color-muted-foreground, #6b7387); }
+.log-time {
+  flex: none;
+  font-size: 9px;
+  color: var(--color-muted-foreground, #6b7387);
+  font-variant-numeric: tabular-nums;
+}
+.log-msg {
+  flex: 1;
+  min-width: 0;
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.home-matrix-c {
+  position: absolute;
+  inset: 0;
+  top: 24px;
+  width: 100%;
+  height: calc(100% - 24px);
+}
+
+/* ── notes widget ── */
+.home-notes { display: flex; flex-direction: column; gap: 1px; height: calc(100% - 18px); overflow-y: auto; }
+.home-notes .note-row {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 1px 0;
+  border-bottom: 1px solid rgb(255 255 255 / 0.04);
+}
+.home-notes .note-mark {
+  cursor: pointer;
+  width: 12px;
+  text-align: center;
+  color: var(--home-accent);
+  flex-shrink: 0;
+}
+.home-notes .note-mark.done { color: var(--color-muted-foreground, #6b7387); }
+.home-notes .note-text { cursor: text; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.home-notes .note-text.done {
+  text-decoration: line-through;
+  color: var(--color-muted-foreground, #6b7387);
+}
+.home-notes .note-input {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  border-bottom: 1px dashed var(--home-border);
+  outline: none;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+}
+.home-notes .note-add {
+  align-self: flex-start;
+  margin-top: 4px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--home-accent-dim);
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px 6px 2px 2px;
+}
+.home-notes .note-add:hover { color: var(--home-accent); }
+
+/* ── canvas widgets (heartbeat, life) ── */
+.home-canvas {
+  position: absolute;
+  inset: 0;
+  top: 24px;
+  width: 100%;
+  height: calc(100% - 24px);
+}
+/* Life is drawable in rest mode — signal it with a crosshair. */
+.home-root:not(.editing) .home-life { cursor: crosshair; }
+
+/* ── moon ── */
+.home-moon-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: calc(100% - 18px);
+}
+.home-moon-c { flex: 1; width: 100%; min-height: 0; }
+.home-moon-label {
+  color: var(--home-accent-dim);
+  font-size: max(8px, min(3cqw, 6cqh));
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+/* ── pomodoro / countdown ── */
+.home-pomo .home-clock,
+.home-count .home-clock { cursor: pointer; }
+.home-pomo .home-clock.paused { opacity: 0.55; }
+.home-pomo .pomo-sub { cursor: pointer; }
+.home-count .count-label { cursor: pointer; }
+.home-count .count-input,
+.home-pomo .count-input { max-width: 92%; text-align: center; color-scheme: dark; }
+
+/* ── countdown segment editor (alarm-style spinners) ── */
+.count-edit {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  height: calc(100% - 18px);
+}
+.count-edit-row { display: flex; align-items: center; gap: 5px; }
+.count-seg { display: flex; flex-direction: column; align-items: center; }
+.count-seg .seg-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  line-height: 0.6;
+  font-size: 8px;
+  color: var(--home-accent-dim);
+}
+.count-seg .seg-btn:hover { color: var(--home-accent); }
+.count-seg .seg-val {
+  background: none;
+  border: none;
+  outline: none;
+  text-align: center;
+  color: var(--home-accent);
+  font: inherit;
+  font-weight: 800;
+  font-size: max(12px, min(7cqw, 15cqh));
+  padding: 1px 0;
+  border-bottom: 1px solid transparent;
+  letter-spacing: 0.02em;
+}
+.count-seg input.seg-val:focus { border-bottom-color: var(--home-accent); }
+.count-seg .seg-static { cursor: default; }
+.count-colon {
+  font-weight: 800;
+  color: var(--home-accent-dim);
+  font-size: max(12px, min(7cqw, 15cqh));
+}
+.count-done {
+  margin-top: 3px;
+  background: none;
+  border: 1px solid var(--home-border);
+  border-radius: 6px;
+  color: var(--home-accent);
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 12px;
+}
+.count-done:hover { border-color: var(--home-accent); }
+.home-pomo .pomo-min {
+  font-size: min(20cqw, 40cqh);
+  font-weight: 800;
+  color: var(--home-accent);
+  max-width: 70%;
+}
+/* Hover steppers for the pomodoro work/break lengths. */
+.hover-ctl.pomo-set { flex-direction: column; align-items: flex-end; gap: 1px; }
+.pomo-stepper { display: flex; align-items: center; gap: 3px; }
+.pomo-stepper .hv-label:nth-child(3) { min-width: 16px; text-align: center; color: var(--home-accent); }
+
+/* ── calendar ── */
+.home-cal { height: calc(100% - 18px); display: flex; flex-direction: column; }
+.home-cal-month {
+  text-align: center;
+  color: var(--home-accent-dim);
+  font-size: max(9px, min(3.2cqw, 7cqh));
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.home-cal-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  align-content: space-evenly;
+  justify-items: center;
+  font-size: max(8px, min(3cqw, 6.5cqh));
+}
+.home-cal-h { color: var(--color-muted-foreground, #6b7387); }
+.home-cal-d { color: var(--color-foreground, #d8dce6); opacity: 0.75; }
+.home-cal-today {
+  color: #000;
+  background: var(--home-accent);
+  border-radius: 4px;
+  padding: 0 4px;
+  font-weight: 700;
+}
+/* Density tiers, chosen from the widget's cell width (see CalendarWidget). */
+.home-cal.tier-mini .home-cal-month {
+  font-size: max(8px, min(4cqw, 8cqh));
+  margin-bottom: 2px;
+}
+.home-cal.tier-mini .home-cal-grid { font-size: max(9px, min(4cqw, 8cqh)); }
+.home-cal.tier-large .home-cal-month {
+  font-size: max(11px, min(3cqw, 7cqh));
+  margin-bottom: 7px;
+}
+.home-cal.tier-large .home-cal-grid { row-gap: 3px; }
+.home-cal.tier-large .home-cal-h { font-weight: 700; opacity: 0.8; }
+.home-cal.tier-large .home-cal-today { padding: 1px 6px; }
+
+/* ── page chrome ── */
+/* Edit affordance lives BELOW the grid, centered. It fades in once the user
+ * starts scrolling down (or immediately when the grid is short enough that
+ * there's nothing to scroll), keeping the home clean on first paint. While
+ * editing it sticks to the bottom of the viewport so it stays reachable. */
+.home-editbar {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  padding: 22px 12px 30px;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  pointer-events: none;
+}
+.home-editbar.visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+.home-root.editing .home-editbar {
+  position: sticky;
+  bottom: 0;
+}
+.home-fab {
+  position: relative;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  cursor: pointer;
+  color: var(--home-accent);
+  background: var(--home-surface);
+  border: 1px solid var(--home-border);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition:
+    border-color 0.25s ease,
+    background 0.35s ease,
+    box-shadow 0.45s ease,
+    transform 0.4s cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+.home-fab:hover {
+  border-color: var(--home-accent);
+  transform: scale(1.06);
+}
+.home-fab:active { transform: scale(0.94); }
+.home-fab.active {
+  background: color-mix(in srgb, var(--home-accent) 22%, transparent);
+  /* Warm Hermes glow ring when edit mode engages. */
+  animation: home-fab-glow 0.55s ease-out;
+}
+
+/* Crossfading edit ✎ ↔ done ✓ glyphs — each rotates and scales through the
+ * swap with a gentle overshoot, matching the dashboard's soft motion. */
+.home-fab-ico {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    opacity 0.3s ease,
+    transform 0.45s cubic-bezier(0.34, 1.45, 0.64, 1);
+}
+.ico-edit { opacity: 1; transform: rotate(0) scale(1); }
+.ico-done { opacity: 0; transform: rotate(-120deg) scale(0.3); }
+.home-fab.active .ico-edit { opacity: 0; transform: rotate(120deg) scale(0.3); }
+.home-fab.active .ico-done { opacity: 1; transform: rotate(0) scale(1); }
+
+.home-fab-spin {
+  display: inline-block;
+  animation: home-fab-spin-in 0.5s cubic-bezier(0.34, 1.4, 0.64, 1);
+}
+
+/* The restore-default button slides up into place, like the dashboard's
+ * dialog-in entrance. */
+.home-fab-enter {
+  animation: home-fab-enter 0.32s cubic-bezier(0.34, 1.3, 0.64, 1);
+}
+
+@keyframes home-fab-glow {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--home-accent) 55%, transparent); }
+  100% { box-shadow: 0 0 0 13px transparent; }
+}
+@keyframes home-fab-spin-in {
+  from { transform: rotate(-150deg); opacity: 0.3; }
+  to   { transform: rotate(0); opacity: 1; }
+}
+@keyframes home-fab-enter {
+  from { opacity: 0; transform: translateY(6px) scale(0.9); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-fab,
+  .home-fab-ico,
+  .home-fab-spin,
+  .home-fab-enter { animation: none; transition: opacity 0.2s ease; }
+}
+
+/* ── toast (plugin-local; the host toast isn't exposed in the SDK) ── */
+.home-toast {
+  position: fixed;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 80;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-size: 12px;
+  color: var(--home-error, #e25555);
+  background: var(--home-surface);
+  border: 1px solid var(--home-error, #e25555);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.45);
+  animation: home-toast-in 0.25s ease;
+}
+@keyframes home-toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
+  to { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+
+/* Catalog reveal: the wrapper animates its row track 0fr → 1fr so the panel
+ * grows/collapses its real height smoothly (no grid jump), with a matching
+ * fade. Kept mounted so the exit animates too. */
+.home-catalog-wrap {
+  display: grid;
+  grid-template-rows: 0fr;
+  margin: 0 12px;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    grid-template-rows 0.34s cubic-bezier(0.34, 1.2, 0.64, 1),
+    opacity 0.28s ease,
+    margin-bottom 0.34s ease;
+}
+.home-catalog-wrap.open {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  pointer-events: auto;
+  margin-bottom: 8px;
+}
+.home-catalog {
+  overflow: hidden;
+  min-height: 0;
+  border-radius: 8px;
+  background: var(--home-surface);
+  border: 1px solid var(--home-border);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+/* Highlighted as a delete target while a widget is dragged over it. */
+.home-catalog-wrap.trash-active .home-catalog {
+  border-color: var(--home-error);
+  border-style: dashed;
+  background: color-mix(in srgb, var(--home-error) 10%, var(--home-surface));
+}
+.home-catalog-inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+}
+.home-catalog-hint {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--color-muted-foreground, #6b7387);
+  margin-right: 4px;
+}
+.home-catalog-wrap.trash-active .home-catalog-hint { color: var(--home-error); }
+.home-catalog-chip { touch-action: none; }
+.home-catalog-chip {
+  font-family: inherit;
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  background: none;
+  border: 1px dashed var(--home-border);
+  color: var(--color-foreground, #d8dce6);
+  transition: border-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
+}
+.home-catalog-chip:hover {
+  border-color: var(--home-accent);
+  color: var(--home-accent);
+  transform: translateY(-1px);
+}
+.home-catalog-chip:active { transform: scale(0.95); }
+.home-catalog .empty { color: var(--color-muted-foreground, #6b7387); font-size: 11px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .home-catalog-wrap { transition: opacity 0.2s ease; }
+}
+
+/* ── Agent widget (the eye) ─────────────────────────────────────────── */
+
+.home-agent {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  /* The .hd header sits above in the same content box (same as the other
+   * widgets' calc) — 100% pushed the stats row 8px past the bottom edge. */
+  height: calc(100% - 21px);
+  min-height: 0;
+  overflow: hidden;
+  font-size: 11px;
+  box-sizing: border-box;
+}
+
+/* The animated scene owns the leftover space and centers its content
+ * vertically; head/stats/history are fixed rows that never move or
+ * overflow. flex-basis: 0 — the scene shrinks to zero before the fixed
+ * rows are ever pushed out. */
+.home-agent-scene {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+
+.home-agent-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-height: 18px;
+  flex: none;
+}
+
+.home-agent-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--home-accent);
+  opacity: 0.45;
+  flex: none;
+  box-shadow: 0 0 6px var(--home-accent);
+}
+.home-agent-dot.busy {
+  opacity: 1;
+  animation: home-agent-pulse 1.2s ease-in-out infinite;
+}
+@keyframes home-agent-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.8); }
+}
+
+.home-agent-status {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 10px;
+  color: var(--color-foreground, #d8dce6);
+}
+
+.home-agent-take {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--home-accent-dim);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.home-agent-take:hover { color: var(--home-accent); background: color-mix(in srgb, var(--home-accent) 10%, transparent); }
+.home-agent-take:active { transform: scale(0.95); }
+
+/* Play triangle, pure CSS — no emoji. */
+.home-agent-take-ico {
+  width: 0;
+  height: 0;
+  border-left: 4.5px solid currentColor;
+  border-top: 3px solid transparent;
+  border-bottom: 3px solid transparent;
+}
+
+.home-agent-line {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.home-agent-toolbox {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+.home-agent-k {
+  color: var(--home-accent);
+  flex: none;
+}
+.home-agent-dim { color: var(--color-muted-foreground, #6b7387); }
+
+.home-agent-msg {
+  color: var(--color-muted-foreground, #8b93a7);
+  font-style: italic;
+  max-height: 42px;
+  white-space: normal;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.home-agent-stats {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 10px;
+  color: var(--color-foreground, #d8dce6);
+  border-top: 1px solid var(--home-border);
+  padding-top: 5px;
+  /* Shrinkable last: the scene compresses first (flex-basis 0), then this
+     row and the history may compress instead of overflowing the widget. */
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
+.home-agent-stats span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.home-agent-stats i {
+  font-style: normal;
+  color: var(--color-muted-foreground, #6b7387);
+  font-size: 9px;
+}
+
+.home-agent-history {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  max-height: 40px;
+  overflow: hidden;
+  flex: 0 1 auto;
+  min-height: 0;
+}
+.home-agent-hist {
+  font-size: 10px;
+  color: var(--color-muted-foreground, #8b93a7);
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+}
+.home-agent-hist-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex: none;
+}
+.home-agent-hist-dot.ok { background: #2dd4bf; }
+.home-agent-hist-dot.bad { background: var(--home-error); }
+.home-agent-hist i {
+  font-style: normal;
+  font-size: 9px;
+  color: var(--color-muted-foreground, #6b7387);
+}
+
+/* ── Agent theater (take-control fullscreen) ───────────────────────── */
+
+.home-theater {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: color-mix(in srgb, var(--ui-editor-surface-background, rgb(8 8 12 / 1)) 92%, #000);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  display: flex;
+  flex-direction: column;
+  padding: 18px 22px 22px;
+  gap: 14px;
+  overflow: auto;
+  font-family: var(--theme-font-mono, ui-monospace, monospace);
+  color: var(--color-foreground, #d8dce6);
+  animation: home-theater-in 0.22s ease;
+}
+@keyframes home-theater-in {
+  from { opacity: 0; transform: scale(0.985); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.home-theater-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px solid var(--home-border);
+  padding-bottom: 10px;
+  flex: none;
+}
+
+.home-theater-title {
+  font-size: 13px;
+  letter-spacing: 0.14em;
+  color: var(--home-accent);
+}
+
+.home-theater-sub {
+  font-size: 10px;
+  color: var(--color-muted-foreground, #6b7387);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.home-theater-release {
+  margin-left: auto;
+  background: transparent;
+  border: 1px solid var(--home-border);
+  color: var(--color-foreground, #d8dce6);
+  border-radius: 6px;
+  font-size: 11px;
+  font-family: inherit;
+  padding: 4px 12px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, color 0.15s ease;
+}
+.home-theater-release:hover {
+  border-color: var(--home-error);
+  color: var(--home-error);
+}
+
+.home-theater-grid {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 12px;
+  flex: 1;
+  min-height: 0;
+  align-content: start;
+}
+.home-theater-span-5 { grid-column: span 5; }
+.home-theater-span-7 { grid-column: span 7; }
+.home-theater-span-12 { grid-column: span 12; }
+@media (max-width: 900px) {
+  .home-theater-span-5, .home-theater-span-7, .home-theater-span-12 { grid-column: span 12; }
+}
+
+.home-theater-panel {
+  background: var(--home-surface);
+  border: 1px solid var(--home-border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 160px;
+  max-height: 420px;
+  overflow: hidden;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.35);
+}
+
+.home-theater-panel-title {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--color-muted-foreground, #6b7387);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex: none;
+  text-transform: uppercase;
+}
+.home-theater-dim {
+  color: var(--color-muted-foreground, #6b7387);
+  font-size: 10px;
+  font-style: italic;
+}
+
+/* NOW panel */
+.home-theater-current-tool {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  background: color-mix(in srgb, var(--home-accent) 8%, transparent);
+  border: 1px solid var(--home-border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  flex: none;
+}
+.home-theater-ct-name {
+  color: var(--home-accent);
+  font-size: 12px;
+}
+.home-theater-ct-args {
+  font-size: 10px;
+  color: var(--color-muted-foreground, #8b93a7);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-theater-stream {
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--color-foreground, #d8dce6);
+  background: color-mix(in srgb, var(--home-accent) 4%, transparent);
+  border-left: 2px solid var(--home-accent);
+  padding: 6px 10px;
+  border-radius: 0 6px 6px 0;
+  max-height: 110px;
+  overflow: auto;
+  flex: none;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.home-theater-feed {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 10.5px;
+}
+.home-theater-feed-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 1px 0;
+  border-bottom: 1px solid color-mix(in srgb, var(--home-border) 40%, transparent);
+  animation: home-feed-in 0.32s ease-out both;
+}
+.home-theater-feed-time {
+  color: var(--color-muted-foreground, #555d70);
+  flex: none;
+  font-size: 9.5px;
+}
+/* Kind dot, pure CSS — no emoji. */
+.home-theater-feed-kind {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  align-self: center;
+}
+.home-theater-feed-kind.tool { background: var(--home-accent); }
+.home-theater-feed-kind.message { background: #2dd4bf; }
+.home-theater-feed-kind.subagent { background: #a78bfa; }
+.home-theater-feed-kind.system { background: var(--color-muted-foreground, #6b7387); }
+.home-theater-feed-kind.bad { background: var(--home-error); }
+.home-theater-feed-label {
+  color: var(--color-foreground, #d8dce6);
+  flex: none;
+}
+.home-theater-feed-detail {
+  color: var(--color-muted-foreground, #8b93a7);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.home-theater-foot {
+  display: flex;
+  gap: 14px;
+  font-size: 9.5px;
+  color: var(--color-muted-foreground, #555d70);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  flex: none;
+  border-top: 1px solid var(--home-border);
+  padding-top: 6px;
+}
+
+/* FUNCTION panel */
+.home-theater-fn-current {
+  background: color-mix(in srgb, var(--home-accent) 8%, transparent);
+  border: 1px solid var(--home-border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: none;
+}
+.home-theater-fn-name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--home-accent);
+}
+.home-theater-fn-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
+}
+.home-theater-fn-dot.running {
+  background: var(--home-accent);
+  animation: home-agent-pulse 1.2s ease-in-out infinite;
+}
+.home-theater-fn-dot.ok { background: #2dd4bf; }
+.home-theater-fn-dot.bad { background: var(--home-error); }
+.home-theater-fn-state {
+  margin-left: auto;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 1px 8px;
+  border-radius: 20px;
+  border: 1px solid;
+}
+.home-theater-fn-state.running {
+  color: var(--home-accent);
+  border-color: var(--home-accent);
+}
+.home-theater-fn-args {
+  font-size: 10px;
+  color: var(--color-muted-foreground, #8b93a7);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 120px;
+  overflow: auto;
+  margin: 0;
+  font-family: inherit;
+}
+
+.home-theater-fn-history {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 10.5px;
+}
+.home-theater-fn-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  border-bottom: 1px solid color-mix(in srgb, var(--home-border) 40%, transparent);
+  padding: 2px 0;
+}
+.home-theater-fn-hname { color: var(--color-foreground, #d8dce6); flex: none; }
+.home-theater-fn-hargs {
+  color: var(--color-muted-foreground, #8b93a7);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.home-theater-fn-hdur {
+  margin-left: auto;
+  color: var(--color-muted-foreground, #6b7387);
+  flex: none;
+  font-size: 9.5px;
+}
+
+/* TOKENS & COST panel */
+.home-theater-tok-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+.home-theater-tok-cell {
+  background: color-mix(in srgb, var(--home-accent) 5%, transparent);
+  border: 1px solid var(--home-border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  overflow: hidden;
+}
+.home-theater-tok-num {
+  font-size: 15px;
+  color: var(--color-foreground, #d8dce6);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.home-theater-tok-num.home-theater-money { color: var(--home-accent); }
+.home-theater-tok-lbl {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--color-muted-foreground, #6b7387);
+}
+
+.home-theater-tok-models {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 10px;
+  border-top: 1px solid var(--home-border);
+  padding-top: 6px;
+}
+.home-theater-tok-model {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+}
+.home-theater-tok-mname { color: var(--color-foreground, #d8dce6); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.home-theater-tok-mtok { color: var(--color-muted-foreground, #8b93a7); margin-left: auto; }
+.home-theater-tok-mcost { color: var(--home-accent); flex: none; }
+
+.home-theater-tok-session {
+  border-top: 1px solid var(--home-border);
+  padding-top: 6px;
+  font-size: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.home-theater-tok-slbl {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--color-muted-foreground, #6b7387);
+}
+.home-theater-tok-stitle {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home-theater-tok-snum {
+  color: var(--color-muted-foreground, #8b93a7);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* PROJECT panel */
+.home-theater-proj-session {
+  background: color-mix(in srgb, var(--home-accent) 5%, transparent);
+  border: 1px solid var(--home-border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.home-theater-proj-title { font-size: 12px; color: var(--color-foreground, #d8dce6); }
+.home-theater-proj-meta {
+  font-size: 9.5px;
+  color: var(--color-muted-foreground, #6b7387);
+}
+
+.home-theater-proj-files {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 10.5px;
+}
+.home-theater-proj-file {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  border-bottom: 1px solid color-mix(in srgb, var(--home-border) 40%, transparent);
+  padding: 2px 0;
+}
+.home-theater-proj-glyph {
+  color: var(--home-accent);
+  flex: none;
+  font-size: 9px;
+  width: 16px;
+  text-align: center;
+}
+.home-theater-proj-path {
+  color: var(--color-muted-foreground, #8b93a7);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.home-theater-proj-subagents {
+  border-top: 1px solid var(--home-border);
+  padding-top: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 10px;
+}
+.home-theater-proj-subagent { display: flex; gap: 8px; align-items: baseline; }
+.home-theater-proj-subdot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
+  align-self: center;
+}
+.home-theater-proj-subdot.run { background: var(--home-accent); animation: home-agent-pulse 1.2s ease-in-out infinite; }
+.home-theater-proj-subdot.done { background: #2dd4bf; }
+.home-theater-proj-subname { color: var(--color-foreground, #d8dce6); }
+.home-theater-proj-subgoal {
+  color: var(--color-muted-foreground, #6b7387);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* RECOMMENDATIONS panel */
+.home-theater-rec-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.home-theater-rec {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  border: 1px solid var(--home-border);
+  border-radius: 8px;
+  padding: 7px 10px;
+  background: color-mix(in srgb, var(--home-surface) 60%, transparent);
+}
+.home-theater-rec.warn { border-color: color-mix(in srgb, #e8b33c 45%, transparent); }
+.home-theater-rec.crit { border-color: color-mix(in srgb, var(--home-error) 55%, transparent); }
+.home-theater-rec-tag {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  font-size: 10px;
+  margin-top: 1px;
+}
+.home-theater-rec.info .home-theater-rec-tag {
+  color: var(--home-accent);
+  border: 1px solid var(--home-accent);
+}
+.home-theater-rec.warn .home-theater-rec-tag {
+  color: #e8b33c;
+  border: 1px solid #e8b33c;
+}
+.home-theater-rec.crit .home-theater-rec-tag {
+  color: var(--home-error);
+  border: 1px solid var(--home-error);
+}
+.home-theater-rec-body { min-width: 0; }
+.home-theater-rec-title { font-size: 11px; color: var(--color-foreground, #d8dce6); }
+.home-theater-rec-detail {
+  font-size: 10px;
+  color: var(--color-muted-foreground, #8b93a7);
+  margin-top: 1px;
+}
+
+/* ── Live scene — the animated centerpiece ────────────────────────────
+ * On identity change: the outgoing content slides up while fading, the
+ * incoming content rises from below with a blur that dissolves as it
+ * settles. */
+
+.home-theater-scene {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+}
+
+.home-scene {
+  position: relative;
+  width: 100%;
+}
+
+.home-scene-item {
+  animation: home-scene-in 0.42s ease-out both;
+}
+
+.home-scene-item.leaving {
+  position: absolute;
+  inset-inline: 0;
+  top: 0;
+  animation: home-scene-out 0.4s ease-in forwards;
+  pointer-events: none;
+}
+
+@keyframes home-scene-in {
+  from {
+    opacity: 0;
+    transform: translateY(26px);
+    filter: blur(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
+@keyframes home-scene-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-26px);
+    filter: blur(4px);
+  }
+}
+
+@keyframes home-feed-in {
+  from { opacity: 0; transform: translateY(7px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes home-caret-blink {
+  0%, 45% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+/* Scene content — tool call */
+.home-scene-tool {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.home-scene-title {
+  color: var(--home-accent);
+  font-size: 12px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.home-scene-meta {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--color-muted-foreground, #6b7387);
+}
+.home-scene-args {
+  margin: 0;
+  font-family: inherit;
+  font-size: 10px;
+  color: var(--color-muted-foreground, #8b93a7);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 90px;
+  overflow: auto;
+}
+
+/* Scene content — message (markdown-rendered) */
+.home-scene-msg {
+  font-size: 11.5px;
+  line-height: 1.6;
+  color: var(--color-foreground, #d8dce6);
+  word-break: break-word;
+  max-height: 150px;
+  overflow: auto;
+}
+.home-scene-msg strong {
+  color: var(--home-accent);
+  font-weight: 650;
+}
+.home-scene-msg em { font-style: italic; }
+.home-scene-msg code {
+  font-family: var(--theme-font-mono, ui-monospace, monospace);
+  font-size: 0.92em;
+  color: var(--home-accent);
+  background: color-mix(in srgb, var(--home-accent) 10%, transparent);
+  padding: 0 4px;
+  border-radius: 4px;
+  white-space: pre-wrap;
+}
+.home-scene-msg .home-md-pre {
+  margin: 4px 0;
+  background: color-mix(in srgb, var(--home-accent) 5%, transparent);
+  border: 1px solid var(--home-border);
+  border-left: 2px solid var(--home-accent);
+  border-radius: 0 6px 6px 0;
+  padding: 6px 10px;
+  overflow: auto;
+  max-height: 120px;
+}
+.home-scene-msg .home-md-pre code {
+  background: none;
+  padding: 0;
+  color: var(--color-muted-foreground, #9aa3b8);
+  font-size: 10px;
+  line-height: 1.5;
+  white-space: pre;
+}
+.home-scene-msg .home-md-h {
+  color: var(--home-accent);
+  font-weight: 650;
+  margin: 3px 0 1px;
+}
+.home-scene-msg .home-md-h.h1 { font-size: 13px; letter-spacing: 0.02em; }
+.home-scene-msg .home-md-h.h2 { font-size: 12px; }
+.home-scene-msg .home-md-h.h3 { font-size: 11px; }
+.home-scene-msg .home-md-p { margin: 2px 0; }
+.home-scene-msg .home-md-gap { height: 4px; }
+.home-scene-msg .home-md-list { margin: 2px 0; display: flex; flex-direction: column; gap: 1px; }
+.home-scene-msg .home-md-li {
+  padding-left: 14px;
+  position: relative;
+}
+.home-scene-msg .home-md-li::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 0.62em;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--home-accent);
+  opacity: 0.8;
+}
+.home-scene-caret {
+  display: inline-block;
+  width: 6px;
+  height: 13px;
+  margin-left: 2px;
+  vertical-align: -2px;
+  background: var(--home-accent);
+  animation: home-caret-blink 1s steps(1) infinite;
+}
+
+/* Scene content — idle */
+.home-scene-idle {
+  font-size: 10px;
+  font-style: italic;
+  color: var(--color-muted-foreground, #6b7387);
+}
+
+/* Compact scene (widget body) */
+.home-agent-scene .home-scene {
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+.home-agent-scene .home-scene-item {
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+}
+.home-agent-scene .home-scene-msg {
+  font-size: 10.5px;
+  max-height: 64px;
+  overflow: hidden;
+}
+.home-agent-scene .home-scene-tool {
+  gap: 2px;
+}
+.home-agent-scene .home-scene-title {
+  font-size: 11px;
+}
+.home-agent-scene .home-scene-args {
+  font-size: 10px;
+  max-height: 36px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+.home-agent-scene .home-scene-meta,
+.home-agent-scene .home-scene-idle {
+  font-size: 9.5px;
+}
+`;
 const HOME_DESKTOP_PATH = "/home";
 const DESKTOP_START_KEY = "home-dashboard.opened-this-start";
 function createHomeContributions(render, navigate = () => void 0) {
@@ -2545,7 +5314,17 @@ function createHomeContributions(render, navigate = () => void 0) {
     }
   ];
 }
-function openHomeOnDesktopStart(storage, navigate) {
+function isAuxiliaryDesktopWindow(search) {
+  try {
+    return new URLSearchParams(search).has("win");
+  } catch {
+    return false;
+  }
+}
+function openHomeOnDesktopStart(storage, navigate, search = "") {
+  if (isAuxiliaryDesktopWindow(search)) {
+    return false;
+  }
   if (storage.getItem(DESKTOP_START_KEY) === "1") {
     return false;
   }
@@ -2594,7 +5373,8 @@ function createDesktopHomeHost(ctx, desktop) {
       }
       return ctx.rest(path, options);
     },
-    navigateTo: (path) => desktop.navigate(desktopRoute(path))
+    navigateTo: (path) => desktop.navigate(desktopRoute(path)),
+    onEvent: (type, listener) => desktop.onEvent(type, listener)
   };
 }
 function DesktopHomePage() {
@@ -2616,7 +5396,11 @@ const plugin = {
       )
     );
     window.setTimeout(() => {
-      openHomeOnDesktopStart(window.sessionStorage, (path) => host.navigate(path));
+      openHomeOnDesktopStart(
+        window.sessionStorage,
+        (path) => host.navigate(path),
+        window.location.search
+      );
     }, 0);
   }
 };

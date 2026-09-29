@@ -17,6 +17,7 @@ import { PomodoroWidget } from "./PomodoroWidget";
 import { CountdownWidget } from "./CountdownWidget";
 import { CalendarWidget } from "./CalendarWidget";
 import { ProviderUsageWidget } from "./ProviderUsageWidget";
+import { AgentWidget } from "./AgentWidget";
 
 export interface WidgetRenderProps {
   data: HomeData;
@@ -199,4 +200,10 @@ export const WIDGET_REGISTRY: Record<string, WidgetDef> = {
     navigateTo: null, dataSource: null,
   },
   codex: providerUsageWidget("codex", "openai-codex"),
+  agent: {
+    title: "agent",
+    component: ({ data }) => <AgentWidget data={data} />,
+    defaultSize: { gw: 4, gh: 3 }, minSize: { gw: 3, gh: 2 },
+    navigateTo: null, dataSource: null,
+  },
 };

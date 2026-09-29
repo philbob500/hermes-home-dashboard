@@ -103,7 +103,7 @@ async def get_desktop_system() -> Dict[str, Any]:
 async def get_desktop_analytics(days: int = 30, profile: str | None = None) -> Dict[str, Any]:
     from hermes_cli.web_routers.analytics import get_usage_analytics
 
-    return await get_usage_analytics(days=max(1, min(366, days)), profile=profile)
+    return await get_usage_analytics(days=max(1, min(365, days)), profile=profile)
 
 
 @router.get("/cron")

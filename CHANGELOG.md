@@ -20,6 +20,45 @@ clone, they never build).
 
 ---
 
+## 1.5.0 — 2026-09-27
+
+Polish pass, verified in a live Hermes Desktop.
+
+- **Logs:** Windows hosts return CRLF lines, which the parser read as one fake
+  `INFO` record holding the raw tail (the "INFO … INFO" line). Lines are now
+  split correctly, the `[session]` tag no longer hides the component, rows show
+  `HH:MM:SS`, and the list scrolls inside the widget with a soft bottom fade
+  instead of spilling past the edge.
+- **Widget states:** the single `● no data` is replaced by `offline` (backend
+  unreachable), `unavailable` (one source failing) and a `stale` header tag
+  that keeps the last good data on screen during a failed poll.
+- **Agent:** the stats row no longer overflows 8px below the widget.
+- **Matrix:** the canvas is sized to whole glyph rows — no half-cut bottom row.
+- **Sessions / Cron:** names ellipsize at the real column width with the full
+  name on hover, instead of a fixed character cut ("bitacoras-guayab").
+- **Contrast:** widget headers and the Hermes version caption are readable.
+
+## 1.4.1 — 2026-09-27
+
+- **Fix: HUD mode no longer breaks.** The "open Home once per start" hook
+  also ran inside Desktop's auxiliary windows (HUD, pop-out session, pop-out
+  browser), each of which has its own `sessionStorage`. In the HUD it
+  navigated to `/home`, replacing the chat with a clipped Home page and
+  dropping the session route. Windows carrying `?win=` are now left alone.
+
+## 1.4.0 — 2026-09-27
+
+- **Fix: plugin loads again on current Hermes.** Hermes removed the
+  `hermes_cli.web_server.*` compatibility re-exports on 2026-09-14, so the
+  backend (`plugin_api.py`) was refused at load and the Home layout/data
+  routes stopped working. The Desktop data adapters now import from the
+  defining modules under `hermes_cli.web_routers` (`status`, `analytics`,
+  `cron`, `sessions`); analytics range clamp aligned to the host's 1–365 days.
+- **Agent widget** with take-control theater mode, animated live scene,
+  markdown scene and tool-first priority.
+- **Install (Windows):** the Desktop plugin is copied instead of junctioned,
+  and backups live outside `desktop-plugins/`.
+
 ## 1.3.0 — 2026-08-03
 
 - **Host: live graphs view.** Third view in the hover cycle
