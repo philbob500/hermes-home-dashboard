@@ -18,6 +18,7 @@ import { CountdownWidget } from "./CountdownWidget";
 import { CalendarWidget } from "./CalendarWidget";
 import { ProviderUsageWidget } from "./ProviderUsageWidget";
 import { AgentWidget } from "./AgentWidget";
+import { PaperValueWidget } from "./PaperValueWidget";
 
 export interface WidgetRenderProps {
   data: HomeData;
@@ -192,6 +193,12 @@ export const WIDGET_REGISTRY: Record<string, WidgetDef> = {
     title: "limits",
     component: () => <ProviderUsageWidget />,
     defaultSize: { gw: 4, gh: 3 }, minSize: { gw: 3, gh: 3 },
+    navigateTo: null, dataSource: null,
+  },
+  "paper-value": {
+    title: "paper value",
+    component: () => <PaperValueWidget />,
+    defaultSize: { gw: 5, gh: 4 }, minSize: { gw: 3, gh: 3 },
     navigateTo: null, dataSource: null,
   },
   agent: {

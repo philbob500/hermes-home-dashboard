@@ -119,7 +119,7 @@ they never fight drag/resize.
 
 ## Widgets
 
-16 widgets, each with a hover control that fits what it does:
+19 widgets, each with a hover control that fits what it does:
 
 | Widget | Hover control |
 |---|---|
@@ -127,6 +127,9 @@ they never fight drag/resize.
 | **Calendar** | page months · 3 responsive sizes |
 | **Moon** | scrub the phase ±1 day |
 | **Tokens** | switch range (7 days / 1 month / 6 months) · line ↔ bars chart · show/hide totals · hover a point for an animated tooltip |
+| **Paper value** | switch time range (24 h / 7 d / all) · refresh · hover a point for timestamp, value and valuation source |
+| **Limits** | provider quota windows and DeepSeek credit |
+| **Agent** | live agent activity and compact history |
 | **Host** | cycle meters ↔ numeric detail ↔ live graphs (four rolling one-minute sparklines: cpu, ram, load, proc) |
 | **Gateway** | hover expands read-only detail (pid, health, config) |
 | **Sessions** | paginate recent sessions |
@@ -142,6 +145,12 @@ they never fight drag/resize.
 
 State that should stick (ranges, formats, timer lengths…) is saved to the layout;
 transient state (current page, browsed month) resets on reload.
+
+The Paper value widget reads only `TRADING_SIM_DASHBOARD_URL` from the backend
+process environment. It fails closed if unset and accepts only the exact
+`/api/status.json` path on a loopback or Tailscale CGNAT address; HTTP redirects
+are rejected. Keep the host-specific URL in the local service environment, not
+in the plugin source.
 
 ## How it works
 

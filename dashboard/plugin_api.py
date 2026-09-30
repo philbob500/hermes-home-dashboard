@@ -8,11 +8,15 @@ outside the repo that `git reset --hard` touches).
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
+import math
 import os
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
+from urllib.parse import urlsplit
 
 try:
     from hermes_constants import get_hermes_home
@@ -47,6 +51,115 @@ router = APIRouter()
 
 LAYOUT_FILE = get_hermes_home() / "plugins" / "home-dashboard" / "layout.json"
 _MAX_WIDGETS = 64
+TRADING_SIM_URL = os.environ.get("TRADING_SIM_DASHBOARD_URL", "").strip()
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *_args: Any, **_kwargs: Any) -> None:
+        return None
+
+
+def _parse_timestamp(value: str) -> datetime:
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
+
+
+def _internal_trading_url(url: str) -> bool:
+    """Only allow HTTP loopback or Tailscale CGNAT targets; prevent proxy SSRF."""
+    try:
+        parts = urlsplit(url)
+        address = ipaddress.ip_address(parts.hostname or "")
+    except ValueError:
+        return False
+    return (
+        parts.scheme == "http"
+        and parts.path == "/api/status.json"
+        and not parts.query
+        and not parts.fragment
+        and parts.username is None
+        and parts.password is None
+        and (address.is_loopback or address in ipaddress.ip_network("100.64.0.0/10"))
+    )
+
+
+def _fetch_trading_payload() -> Dict[str, Any]:
+    if not _internal_trading_url(TRADING_SIM_URL):
+        raise ValueError("Trading dashboard URL must be local or Tailnet-only")
+    request = urllib.request.Request(TRADING_SIM_URL, headers={"Accept": "application/json"})
+    opener = urllib.request.build_opener(_NoRedirectHandler())
+    with opener.open(request, timeout=4) as response:
+        body = response.read(2_000_001)
+    if len(body) > 2_000_000:
+        raise ValueError("Trading dashboard response is too large")
+    payload = json.loads(body)
+    if not isinstance(payload, dict):
+        raise ValueError("Trading dashboard response is not an object")
+    return payload
+
+
+def _finite_number(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if math.isfinite(number) else None
+
+
+def _valid_timestamp(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    try:
+        stamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return stamp.tzinfo is not None and stamp.utcoffset() is not None
+    except ValueError:
+        return False
+
+
+def _normalize_trading_value(payload: Dict[str, Any]) -> Dict[str, Any]:
+    view = payload.get("view", payload)
+    if not isinstance(view, dict) or view.get("is_probe") is True:
+        return {"available": False, "start_eur": None, "current": None, "series": []}
+
+    series = []
+    raw_series = view.get("paper_series")
+    if not isinstance(raw_series, list):
+        raw_series = []
+    for point in raw_series:
+        if not isinstance(point, dict) or not _valid_timestamp(point.get("at")):
+            continue
+        total = _finite_number(point.get("total_eur"))
+        if total is None:
+            continue
+        series.append({
+            "at": point["at"],
+            "total_eur": total,
+            "source": point.get("source") if isinstance(point.get("source"), str) else None,
+        })
+    series.sort(key=lambda point: _parse_timestamp(point["at"]))
+
+    start_eur = _finite_number(view.get("start_eur"))
+    portfolio = view.get("portfolio")
+    paper = portfolio.get("paper") if isinstance(portfolio, dict) else None
+    if not isinstance(paper, dict):
+        paper = {}
+    current_value = _finite_number(paper.get("total_eur"))
+    current_at = paper.get("as_of")
+    current_source = paper.get("source") if isinstance(paper.get("source"), str) else None
+    current = None
+    current_stamp: datetime | None = None
+    if current_value is not None and _valid_timestamp(current_at):
+        current_stamp = _parse_timestamp(current_at)
+        if current_source is None:
+            current_source = next((p["source"] for p in reversed(series)
+                                   if _parse_timestamp(p["at"]) <= current_stamp), None)
+        current = {"total_eur": current_value, "as_of": current_at, "source": current_source}
+    if series and (current_stamp is None or _parse_timestamp(series[-1]["at"]) > current_stamp):
+        last = series[-1]
+        current = {"total_eur": last["total_eur"], "as_of": last["at"], "source": last["source"]}
+
+    return {"available": current is not None, "start_eur": start_eur,
+            "current": current, "series": series}
 
 
 def _valid_layout(layout: Any) -> bool:
@@ -88,6 +201,16 @@ async def set_layout(body: "LayoutBody") -> Dict[str, Any]:
     LAYOUT_FILE.parent.mkdir(parents=True, exist_ok=True)
     LAYOUT_FILE.write_text(json.dumps(body.layout), encoding="utf-8")
     return {"ok": True}
+
+
+@router.get("/trading-value")
+async def get_trading_value() -> Dict[str, Any]:
+    """Read the paper-value series from the existing Tailnet-only simulator dashboard."""
+    try:
+        payload = await asyncio.to_thread(_fetch_trading_payload)
+        return _normalize_trading_value(payload)
+    except Exception:
+        return {"available": False, "start_eur": None, "current": None, "series": []}
 
 
 # Hermes Desktop deliberately exposes plugin-scoped REST instead of a generic

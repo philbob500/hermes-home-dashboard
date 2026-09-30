@@ -27,8 +27,9 @@ export const DEFAULT_LAYOUT: HomeLayout = {
     { id: "cron",     gx: 6, gy: 7, gw: 3, gh: 3 },
     { id: "errors",   gx: 9, gy: 7, gw: 3, gh: 3 },
     { id: "usage",    gx: 3, gy: 10, gw: 6, gh: 4 },
+    { id: "paper-value", gx: 3, gy: 14, gw: 5, gh: 4 },
   ],
-  seeded: ["usage"],
+  seeded: ["usage", "paper-value"],
 };
 
 function isValidWidget(w: unknown): w is LayoutWidget {
@@ -57,7 +58,11 @@ function firstFreeSlot(widgets: LayoutWidget[], gw: number, gh: number): { gx: n
 /** Tiles the layout seeds by itself. Each one is offered exactly once: a
  *  document written before the tile existed gets it, and a document that
  *  already carries or already got it is left alone. */
-const SEEDED_TILES = ["usage"] as const;
+const SEEDED_TILES = ["usage", "paper-value"] as const;
+const SEEDED_SIZES: Record<(typeof SEEDED_TILES)[number], { gw: number; gh: number }> = {
+  usage: { gw: 4, gh: 3 },
+  "paper-value": { gw: 5, gh: 4 },
+};
 
 /** The per-provider quota tiles were folded into the single `usage` tile that
  *  holds every provider. A layout carrying one of them keeps its slot. */
@@ -72,8 +77,6 @@ export function parseLayout(raw: unknown): HomeLayout {
   const seeded = new Set<string>(
     Array.isArray(o.seeded) ? (o.seeded as unknown[]).filter((id): id is string => typeof id === "string") : [],
   );
-  const size = { gw: 4, gh: 3 };
-
   // Fold a codex and/or claude tile into one usage tile at the first slot the
   // pair used, dropping the second one instead of leaving a gap.
   let folded = false;
@@ -99,15 +102,17 @@ export function parseLayout(raw: unknown): HomeLayout {
   seeded.delete("claude");
 
   for (const id of SEEDED_TILES) {
-    if (widgets.some((widget) => widget.id === id) || folded) {
+    if (widgets.some((widget) => widget.id === id) || (id === "usage" && folded)) {
       seeded.add(id);
       continue;
     }
-    // A version-2 document that never carried the tile means the user removed
-    // it — only a document written before the tile existed gets it seeded.
-    if (o.version !== 1 || seeded.has(id)) {
+    // `paper-value` is a new tile introduced after layout v2. Offer it once to
+    // existing v2 layouts; the persisted seeded marker preserves removals.
+    // `usage` keeps its original v1-only migration so old v2 removals stay gone.
+    if (seeded.has(id) || (id === "usage" && o.version !== 1)) {
       continue;
     }
+    const size = SEEDED_SIZES[id];
     widgets.push({ id, ...firstFreeSlot(widgets, size.gw, size.gh), ...size });
     seeded.add(id);
   }
